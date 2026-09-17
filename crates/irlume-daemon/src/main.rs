@@ -239,20 +239,7 @@ fn models_to_verify<'a>(shipped: &[&'a str], adapter: &'a str) -> Vec<&'a str> {
     v
 }
 
-/// Shipped ViT RGB PAD cue kill switch (ADR-0013). Off via
-/// `IRLUME_PAD_VIT=0` or `pad_vit=0` in settings.conf; on by default.
-fn vit_pad_enabled() -> bool {
-    !matches!(
-        std::env::var("IRLUME_PAD_VIT").ok().as_deref(),
-        Some(v) if irlume_common::config::falsy(v)
-    ) && !matches!(
-        irlume_common::config::read_kv("settings.conf", "pad_vit").as_deref(),
-        Some(v) if irlume_common::config::falsy(v)
-    )
-}
-
-/// Shipped IR PAD cue kill switch, same shape as [`vit_pad_enabled`]
-/// (`IRLUME_PAD_IR=0` / `pad_ir=0`).
+/// Shipped IR PAD cue kill switch (`IRLUME_PAD_IR=0` or `pad_ir=0` in settings.conf).
 fn pad_ir_enabled() -> bool {
     !matches!(
         std::env::var("IRLUME_PAD_IR").ok().as_deref(),
@@ -791,41 +778,6 @@ fn main() {
                             "loaded"
                         } else {
                             "absent (raw IR)"
-                        }
-                    );
-                    let is_ir_only = is_ir_only_policy();
-                    jout_info!(
-                        "irlumed: FaceMesh (passive liveness) {}",
-                        if e.has_mesh() {
-                            "loaded"
-                        } else if is_ir_only {
-                            "skipped (IR-only mode)"
-                        } else {
-                            "absent"
-                        }
-                    );
-                    jout_info!(
-                        "irlumed: rescue detector {}",
-                        if e.has_blaze_rescue() {
-                            "BlazeFace short-range (shipped)"
-                        } else if is_ir_only {
-                            "skipped (IR-only mode)"
-                        } else {
-                            "absent"
-                        }
-                    );
-                    // Shipped PAD cues (ADR-0013): default-on, kill-switched,
-                    // with their measured species coverage named so an
-                    // operator reading the journal knows what each one does
-                    // and does not stop.
-                    jout_info!(
-                        "irlumed: RGB PAD cue (ViT) {} (switch: IRLUME_PAD_VIT=0)",
-                        if e.has_vit_pad() {
-                            "loaded"
-                        } else if is_ir_only {
-                            "skipped (IR-only mode)"
-                        } else {
-                            "unavailable (password fallback)"
                         }
                     );
                     jout_info!(
@@ -7326,11 +7278,6 @@ mod tests {
         let v = models_to_verify(&shipped, "/nonexistent/irlume-test/ir_adapter.onnx");
         assert_eq!(v, shipped);
         assert!(pad_ir_enabled());
-
-        // A kill switch prevents the separate loader/verifier from running.
-        std::env::set_var("IRLUME_PAD_VIT", "0");
-        assert!(!vit_pad_enabled());
-        std::env::remove_var("IRLUME_PAD_VIT");
     }
 
     #[test]
