@@ -263,6 +263,14 @@ fn pad_ir_enabled() -> bool {
     )
 }
 
+/// Whether the machine-wide sensor policy is set to IR-only mode.
+fn is_ir_only_policy() -> bool {
+    matches!(
+        irlume_common::config::observe_face_sensor_policy().resolve(),
+        Ok(irlume_common::config::FaceSensorPolicy::IrOnlyExperimental)
+    )
+}
+
 /// Idle duration before unloading models from memory.
 /// Configured via `IRLUME_IDLE_UNLOAD_SECS` or `idle_unload_secs` in settings.conf.
 /// Defaults to 300 seconds (5 minutes). Set to 0, "off", or "none" to disable idle unloading.
@@ -361,11 +369,12 @@ fn load_pad_models(
     irlume_common::PadModelStatus,
     irlume_common::PadModelStatus,
 ) {
+    let is_ir_only = is_ir_only_policy();
     let strict = strict_requested(
         std::env::var("IRLUME_MODELS_STRICT").ok().as_deref(),
         std::io::stderr(),
     );
-    let vit_enabled = vit_pad_enabled();
+    let vit_enabled = vit_pad_enabled() && !is_ir_only;
     let vit_present = std::path::Path::new(vit_path).exists();
     let vit_weights = (vit_enabled && vit_present)
         .then(|| verified_pad_model(vit_path, strict))
@@ -509,21 +518,21 @@ fn build_engine_from_config(
     irlume_common::PadModelStatus,
     irlume_common::PadModelStatus,
 )> {
-    load_shipped_recognizer(&config.det, &config.model, recognizer)
+    let is_ir_only = is_ir_only_policy();
+    let engine = load_shipped_recognizer(&config.det, &config.model, recognizer)
         .map(|engine| engine.with_devices(&config.rgb_dev, &config.ir_dev))
         .and_then(|engine| engine.with_ir_adapter(&config.adapter))
-        .map(|engine| engine.with_ir_adapter_required(config.adapter_required))
-        // FaceMesh load failure disables rescue alignment but not head
-        // consent, which uses detector landmarks. Outside strict mode the
-        // daemon therefore stays available; strict mode retains the explicit
-        // operator-requested refusal.
-        .and_then(|engine| {
-            if strict_requested(
-                std::env::var("IRLUME_MODELS_STRICT").ok().as_deref(),
-                std::io::stderr(),
-            ) {
-                return engine.with_mesh(&config.mesh);
-            }
+        .map(|engine| engine.with_ir_adapter_required(config.adapter_required))?;
+
+    let engine = if is_ir_only {
+        engine
+    } else {
+        let engine = if strict_requested(
+            std::env::var("IRLUME_MODELS_STRICT").ok().as_deref(),
+            std::io::stderr(),
+        ) {
+            engine.with_mesh(&config.mesh)?
+        } else {
             let (engine, error) = engine.with_mesh_degraded(&config.mesh);
             if let Some(error) = error {
                 jout_warn!(
@@ -534,10 +543,12 @@ fn build_engine_from_config(
                      set IRLUME_MESH_MODEL to the ONNX mesh."
                 );
             }
-            Ok(engine)
-        })
-        .and_then(|engine| engine.with_blaze_rescue(&config.blaze))
-        .map(|engine| load_pad_models(engine, &config.vit_pad, &config.pad_ir))
+            engine
+        };
+        engine.with_blaze_rescue(&config.blaze)?
+    };
+
+    Ok(load_pad_models(engine, &config.vit_pad, &config.pad_ir))
 }
 
 fn rebuild_engine_from_config(
@@ -850,14 +861,23 @@ fn main() {
                             "absent (raw IR)"
                         }
                     );
+                    let is_ir_only = is_ir_only_policy();
                     jout_info!(
                         "irlumed: FaceMesh (passive liveness) {}",
-                        if e.has_mesh() { "loaded" } else { "absent" }
+                        if e.has_mesh() {
+                            "loaded"
+                        } else if is_ir_only {
+                            "skipped (IR-only mode)"
+                        } else {
+                            "absent"
+                        }
                     );
                     jout_info!(
                         "irlumed: rescue detector {}",
                         if e.has_blaze_rescue() {
                             "BlazeFace short-range (shipped)"
+                        } else if is_ir_only {
+                            "skipped (IR-only mode)"
                         } else {
                             "absent"
                         }
@@ -868,7 +888,13 @@ fn main() {
                     // and does not stop.
                     jout_info!(
                         "irlumed: RGB PAD cue (ViT) {} (switch: IRLUME_PAD_VIT=0)",
-                        if e.has_vit_pad() { "loaded" } else { "unavailable (password fallback)" }
+                        if e.has_vit_pad() {
+                            "loaded"
+                        } else if is_ir_only {
+                            "skipped (IR-only mode)"
+                        } else {
+                            "unavailable (password fallback)"
+                        }
                     );
                     jout_info!(
                         "irlumed: IR PAD cue (flir) {} (switch: IRLUME_PAD_IR=0)",
@@ -7646,6 +7672,40 @@ mod tests {
         std::env::remove_var("IRLUME_PAD_IR");
         std::env::remove_var("IRLUME_MODELS_STRICT");
         std::env::remove_var("IRLUME_FORCE_NO_IR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ir_only_policy_skips_rgb_models() {
+        let _guard = env_lock();
+        let dir = std::env::temp_dir().join(format!(
+            "irlume-ir-only-skip-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let settings = dir.join("settings.conf");
+        std::fs::write(&settings, "face_sensor_policy = ir-only-experimental\n").unwrap();
+        std::env::set_var("IRLUME_CONFIG_DIR", &dir);
+
+        assert!(is_ir_only_policy());
+
+        let base = irlume_auth::Engine::load(
+            &model_path("face_detection_yunet_2023mar.onnx"),
+            &model_path("glintr100.onnx"),
+        )
+        .expect("base engine");
+
+        let fake_vit = dir.join("fake_vit.onnx");
+        std::fs::write(&fake_vit, b"fake vit").unwrap();
+        let fake_flir = dir.join("fake_flir.onnx");
+        std::fs::write(&fake_flir, b"fake flir").unwrap();
+
+        let (engine, rgb_pad, _) = load_pad_models(base, &fake_vit.to_string_lossy(), &fake_flir.to_string_lossy());
+        assert_eq!(rgb_pad, irlume_common::PadModelStatus::Disabled);
+        assert!(!engine.has_vit_pad());
+
+        std::env::remove_var("IRLUME_CONFIG_DIR");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
