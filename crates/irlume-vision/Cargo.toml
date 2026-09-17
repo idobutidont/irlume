@@ -22,6 +22,7 @@ libc.workspace = true   # dlopen/dlsym probe: prove a library is loadable ort BE
 irlume-common.workspace = true
 thiserror.workspace = true
 ort = { workspace = true, optional = true }
+rustfft.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
