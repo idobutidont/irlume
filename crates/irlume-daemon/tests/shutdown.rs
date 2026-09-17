@@ -48,8 +48,7 @@ fn daemon_exits_promptly_on_sigterm() {
     let models = models_dir();
     let det = models.join("face_detection_yunet_2023mar.onnx");
     let model = models.join("glintr100.onnx");
-    let mesh = models.join("face_landmark.onnx");
-    let blaze = models.join("blaze_face_short_range.onnx");
+
     let Some(ort) = ort_dylib() else {
         eprintln!("SKIP: no libonnxruntime found");
         return;
@@ -67,8 +66,6 @@ fn daemon_exits_promptly_on_sigterm() {
         .env("IRLUME_SOCKET", &socket)
         .env("IRLUME_DET_MODEL", &det)
         .env("IRLUME_MODEL", &model)
-        .env("IRLUME_MESH_MODEL", &mesh)
-        .env("IRLUME_BLAZE_MODEL", &blaze)
         .env("ORT_DYLIB_PATH", &ort)
         // No real camera work: point the pair at nonexistent nodes so the
         // daemon does not contend with a running instance on this machine.
@@ -156,11 +153,6 @@ fn the_socket_is_connectable_before_startup_finishes() {
         .env("IRLUME_SOCKET", &socket)
         .env("IRLUME_DET_MODEL", &det)
         .env("IRLUME_MODEL", &model)
-        .env("IRLUME_MESH_MODEL", models.join("face_landmark.onnx"))
-        .env(
-            "IRLUME_BLAZE_MODEL",
-            models.join("blaze_face_short_range.onnx"),
-        )
         .env("ORT_DYLIB_PATH", &ort)
         .env("IRLUME_RGB_DEVICE", "/nonexistent-rgb")
         .env("IRLUME_IR_DEVICE", "/nonexistent-ir")

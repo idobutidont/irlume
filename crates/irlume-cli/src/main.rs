@@ -1985,10 +1985,8 @@ fn enrolldev(args: &[String]) -> std::process::ExitCode {
 
 /// Build the direct-mode Engine for the dev tools (`verify`, `enrolldev`,
 /// benchmarks): no daemon involved. Prints one `[engine] …` line to stderr for
-/// each optional model it loads (adapter / mesh / BlazeFace), so a benchmark
-/// log records which stack produced the numbers. `--mesh` and `--blaze`
-/// default to `models/…` paths relative to the CURRENT DIRECTORY, i.e. a repo
-/// checkout; pass explicit paths when running from anywhere else.
+/// each optional model it loads (adapter), so a benchmark
+/// log records which stack produced the numbers.
 /// Which camera nodes the dev-tool engine should open, from the optional
 /// `--rgb`/`--ir` flags. `None` = no override (the engine's own defaults).
 ///
@@ -2038,16 +2036,6 @@ pub(crate) fn engine(
     let e = e.with_ir_adapter(adapter)?;
     if e.has_ir_adapter() {
         eprintln!("[engine] IR adapter loaded ({adapter}); dark mode uses adapted recognition");
-    }
-    let mesh = flag(args, "--mesh").unwrap_or("models/face_landmarks_detector.tflite");
-    let e = e.with_mesh(mesh)?;
-    if e.has_mesh() {
-        eprintln!("[engine] FaceMesh loaded ({mesh}); BlazeFace rescue alignment available");
-    }
-    let blaze = flag(args, "--blaze").unwrap_or("models/blaze_face_short_range.onnx");
-    let e = e.with_blaze_rescue(blaze)?;
-    if e.has_blaze_rescue() {
-        eprintln!("[engine] BlazeFace rescue loaded ({blaze}); detection cascade active");
     }
     Ok(e)
 }
@@ -4110,52 +4098,7 @@ fn doctor_run(
             }
         }
     }
-    // The TFLite runtime the mesh runs on, probed the same way the ONNX row
-    // is: a real load in this shell, naming what resolved. The mesh has been
-    // a .tflite since #295 and a packaged daemon refuses to start without
-    // the runtime, yet no surface reported it (found by the 2026-08-12
-    // release audit through the Repair tab's same gap). The caveat both
-    // rows share: this shell is unconfined, so a load that succeeds here
-    // can still fail under the daemon's AppArmor profile.
-    {
-        use irlume_vision::tflite::{tflite_lib_candidates, tflite_runtime, TfliteUnavailable};
-        match tflite_runtime() {
-            Ok(_) => {
-                let path = tflite_lib_candidates(
-                    std::env::var(irlume_vision::tflite::TFLITE_LIB_ENV)
-                        .ok()
-                        .as_deref(),
-                    |p| p.exists(),
-                )
-                .first()
-                .map_or_else(|| "resolved".to_string(), |p| p.display().to_string());
-                report.check_detail("tflite-runtime", State::Pass, &path);
-                dout!(report, "[doctor] TFLite runtime: {path} ✓");
-            }
-            // A visible override error is an operator mistake THIS shell can
-            // see: Fail. A plain not-found is a guess about the daemon's env
-            // (the unit may set IRLUME_TFLITE_LIB), so Warn, matching the
-            // ONNX fallback row's reasoning.
-            Err(
-                e @ (TfliteUnavailable::OverrideInvalid { .. }
-                | TfliteUnavailable::OverrideFailed { .. }),
-            ) => {
-                report.check_detail("tflite-runtime", State::Fail, e.to_string());
-                dout!(
-                    report,
-                    "[doctor] TFLite runtime: unusable ✗ ({e}); verify or unset IRLUME_TFLITE_LIB"
-                );
-            }
-            Err(e @ TfliteUnavailable::NotFound { .. }) => {
-                report.check_detail("tflite-runtime", State::Warn, e.to_string());
-                dout!(
-                    report,
-                    "[doctor] TFLite runtime: not loadable ⚠ ({e}); \
-                     ensure libtensorflowlite_c.so is installed or set IRLUME_TFLITE_LIB"
-                );
-            }
-        }
-    }
+
     // --- pipeline stages (#276) -----------------------------------------
     // Each stage's model CANDIDATE from this process's search order. A
     // candidate, not a claim about the daemon: the service unit (or a

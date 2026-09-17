@@ -42,22 +42,6 @@
         url = "https://github.com/archledger/irlume/releases/download/models-v1/face_detection_yunet_2023mar.onnx";
         sha256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4";
       };
-      landmark = fetchurl {
-        url = "https://github.com/archledger/irlume/releases/download/models-v1/face_landmark.onnx";
-        sha256 = "821683be088447839638f79d64268bd501bdb72e5d9e262ec981c7e252956caf";
-      };
-      blaze = fetchurl {
-        url = "https://github.com/archledger/irlume/releases/download/models-v1/blaze_face_short_range.onnx";
-        sha256 = "c5453678015f6289c1d77bda88a8ba9c87574f01de1a05ba1909b9a7e08b237b";
-      };
-      landmarkTflite = fetchurl {
-        url = "https://github.com/archledger/irlume/releases/download/models-v1/face_landmarks_detector.tflite";
-        sha256 = "c7d54204ce0448474c7f3fa9af494787c0965cbdd6f20fc72867e43046bd43d5";
-      };
-      livenessVit = fetchurl {
-        url = "https://github.com/archledger/irlume/releases/download/models-v1/liveness_vit.onnx";
-        sha256 = "c7f8a6f3054b11f9719f5e24d37ec227721608fff8b90373c6c3e7659864161c";
-      };
       flir = fetchurl {
         url = "https://github.com/archledger/irlume/releases/download/models-v1/flir.onnx";
         sha256 = "df80cea7228b92562692e56aac965d35766c77399159798c552fb3c77b410c72";
@@ -66,10 +50,6 @@
       mkdir -p "$out"
       cp "$glintr100" "$out/glintr100.onnx"
       cp "$yunet" "$out/face_detection_yunet_2023mar.onnx"
-      cp "$landmark" "$out/face_landmark.onnx"
-      cp "$blaze" "$out/blaze_face_short_range.onnx"
-      cp "$landmarkTflite" "$out/face_landmarks_detector.tflite"
-      cp "$livenessVit" "$out/liveness_vit.onnx"
       cp "$flir" "$out/flir.onnx"
     '',
 }:

@@ -78,19 +78,6 @@ pub struct Engine {
     /// value (#276), because a threshold is a property of one model's cosine
     /// scale and applying another model's number to it is a guess.
     rgb_threshold: f32,
-    /// Optional MediaPipe FaceMesh: dense landmarks used to refine a BlazeFace
-    /// rescue box into alignment points. Loaded iff the model file is present.
-    mesh: Option<irlume_vision::FaceMesh>,
-    /// Optional BlazeFace short-range RESCUE detector: runs only when YuNet
-    /// finds no face (saturated outdoor backgrounds; 2026-07-15 bench: 96.9%
-    /// vs YuNet's 76.9% on the sunlight walking bursts). Needs `mesh` to
-    /// refine its coarse box into alignment landmarks.
-    blaze: Option<Rescue>,
-    /// Shipped ViT RGB PAD cue (`liveness_vit.onnx`, ADR-0013, default-on
-    /// with the daemon's password-only switch): scores the RGB face chip whenever the
-    /// gate verdicted Live and downgrades to Spoof when the rolling median of
-    /// the last `VIT_VOTE_N` scores clears `VIT_THRESHOLD`. DENY-ONLY.
-    vit_pad: Option<irlume_vision::PadVit>,
     /// Rolling per-request ViT scores for the 5-frame-median vote. Reset at
     /// the start of each authentication (`authenticate_for`), because voting
     /// across requests would mix presentations.
@@ -138,22 +125,6 @@ pub struct Engine {
     /// This request was abandoned, independently of higher-priority queued work.
     request_cancelled: Option<std::sync::Arc<dyn Fn() -> bool + Send + Sync>>,
     authentication_deadline: Option<std::time::Instant>,
-}
-
-/// The rescue-slot detector (cascade stage 2): the shipped short-range
-/// BlazeFace on ONNX. The third-party full-range variant was removed with the
-/// BYOM lane (ADR-0015); the type stays a newtype rather than collapsing to
-/// the bare BlazeRescue so the cascade-stage vocabulary and its one-slot
-/// invariant keep their name.
-struct Rescue(irlume_vision::BlazeRescue);
-
-impl Rescue {
-    fn detect_top(
-        &mut self,
-        view: &align::RgbView<'_>,
-    ) -> irlume_common::Result<Option<([f32; 4], f32)>> {
-        self.0.detect_top(view)
-    }
 }
 
 /// Assurance tier of this engine, derived from the available camera hardware.
@@ -3460,9 +3431,6 @@ impl Engine {
             ir_space: "raw".into(),
             embed_space,
             rgb_threshold: irlume_core::RGB_MATCH_THRESHOLD,
-            mesh: None,
-            blaze: None,
-            vit_pad: None,
             vit_scores: Vec::new(),
             pad_ir: None,
             gate: LivenessGate::new(),
@@ -3788,87 +3756,45 @@ impl Engine {
         )
     }
 
-    /// Load MediaPipe FaceMesh for detection-rescue alignment. If the file is absent this is a no-op; the
-    /// mesh-dependent rescue path is skipped, so face auth keeps working.
     #[expect(clippy::missing_errors_doc, reason = "doc backlog")]
-    pub fn with_mesh(mut self, path: &str) -> irlume_common::Result<Self> {
-        if std::path::Path::new(path).exists() {
-            self.mesh = Some(irlume_vision::FaceMesh::load_from_file(path)?);
-        }
+    pub fn with_mesh(self, _path: &str) -> irlume_common::Result<Self> {
         Ok(self)
     }
 
-    /// [`Self::with_mesh`], except a LOAD failure leaves the mesh off and
-    /// hands the error back beside the engine instead of consuming it, so the
-    /// caller can apply its own policy (the daemon degrades outside strict
-    /// mode: killing the daemon over an optional
-    /// rescue model would turn "rescue off" into "face auth dead").
     #[must_use]
-    pub fn with_mesh_degraded(mut self, path: &str) -> (Self, Option<irlume_common::Error>) {
-        if std::path::Path::new(path).exists() {
-            match irlume_vision::FaceMesh::load_from_file(path) {
-                Ok(m) => self.mesh = Some(m),
-                Err(e) => return (self, Some(e)),
-            }
-        }
+    pub fn with_mesh_degraded(self, _path: &str) -> (Self, Option<irlume_common::Error>) {
         (self, None)
     }
 
-    /// Load the BlazeFace short-range rescue detector (improves detection on
-    /// saturated outdoor frames). No-op if the file is absent.
     #[expect(clippy::missing_errors_doc, reason = "doc backlog")]
-    pub fn with_blaze_rescue(mut self, path: &str) -> irlume_common::Result<Self> {
-        // Shipped short-range rescue (ONNX).
-        if std::path::Path::new(path).exists() {
-            self.blaze = Some(Rescue(irlume_vision::BlazeRescue::load_from_file(path)?));
-        }
+    pub fn with_blaze_rescue(self, _path: &str) -> irlume_common::Result<Self> {
         Ok(self)
     }
 
     pub fn has_blaze_rescue(&self) -> bool {
-        self.blaze.is_some()
+        false
     }
 
-    /// Load the shipped ViT RGB PAD classifier (`liveness_vit.onnx`,
-    /// ADR-0013). No-op if the file is absent; ADR-0019 makes the resulting
-    /// unavailable evidence a password-fallback denial without turning model
-    /// absence into a daemon startup failure.
     #[expect(clippy::missing_errors_doc, reason = "doc backlog")]
-    pub fn with_vit_pad(mut self, path: &str) -> irlume_common::Result<Self> {
-        if std::path::Path::new(path).exists() {
-            self.vit_pad = Some(irlume_vision::PadVit::load_from_file(path)?);
-        }
+    pub fn with_vit_pad(self, _path: &str) -> irlume_common::Result<Self> {
         Ok(self)
     }
 
     #[must_use]
-    pub fn with_vit_pad_degraded(mut self, path: &str) -> (Self, Option<irlume_common::Error>) {
-        if std::path::Path::new(path).exists() {
-            match irlume_vision::PadVit::load_from_file(path) {
-                Ok(pad) => self.vit_pad = Some(pad),
-                Err(e) => return (self, Some(e)),
-            }
-        }
+    pub fn with_vit_pad_degraded(self, _path: &str) -> (Self, Option<irlume_common::Error>) {
         (self, None)
     }
 
-    /// Attach the RGB PAD bytes already accepted by the caller's model policy.
-    /// Parsing failures return the unchanged engine and the error. The ONNX
-    /// session owns its parsed state when this returns; the bytes can be freed.
     #[must_use]
     pub fn with_vit_pad_weights_degraded(
-        mut self,
-        bytes: &[u8],
+        self,
+        _bytes: &[u8],
     ) -> (Self, Option<irlume_common::Error>) {
-        match irlume_vision::PadVit::load_from_memory(bytes) {
-            Ok(pad) => self.vit_pad = Some(pad),
-            Err(error) => return (self, Some(error)),
-        }
         (self, None)
     }
 
     pub fn has_vit_pad(&self) -> bool {
-        self.vit_pad.is_some()
+        false
     }
 
     /// Load the shipped IR PAD classifier (`flir.onnx`, ADR-0013): same
@@ -3951,41 +3877,12 @@ impl Engine {
     /// 0.087 NME vs YuNet's 0.053; never align from its own keypoints).
     /// Returns a Detection shaped exactly like YuNet's, or None when either
     /// optional model is absent or no face clears the threshold.
-    fn rescue_detect(&mut self, view: &align::RgbView<'_>, tag: &str) -> Option<Detection> {
-        let blaze = self.blaze.as_mut()?;
-        let mesh = self.mesh.as_mut()?;
-        let (bbox, score) = blaze.detect_top(view).ok().flatten()?;
-        // (both rescue variants return the same coarse-box contract; the
-        // mesh refine below is what turns either into alignment landmarks)
-        let lm = mesh.landmarks(view, &bbox, 0.25).ok()?;
-        if lm.len() < irlume_vision::MESH_N {
-            return None;
-        }
-        const RESCUE_LEFT_EYE_RING: [usize; 6] = [33, 160, 158, 133, 153, 144];
-        const RESCUE_RIGHT_EYE_RING: [usize; 6] = [362, 385, 387, 263, 373, 380];
-        let center = |idx: &[usize; 6]| {
-            let (mut x, mut y) = (0.0f32, 0.0f32);
-            for &i in idx {
-                x += lm[i].0;
-                y += lm[i].1;
-            }
-            (x / 6.0, y / 6.0)
-        };
-        let e1 = center(&RESCUE_LEFT_EYE_RING);
-        let e2 = center(&RESCUE_RIGHT_EYE_RING);
-        let (le, re) = if e1.0 <= e2.0 { (e1, e2) } else { (e2, e1) };
-        let (m1, m2) = (lm[61], lm[291]);
-        let (ml, mr) = if m1.0 <= m2.0 { (m1, m2) } else { (m2, m1) };
-        irlume_common::dlog!("detect({tag}): blaze rescue fired (score {score:.2})");
-        Some(Detection {
-            bbox,
-            score,
-            landmarks: [le, re, lm[1], ml, mr],
-        })
+    fn rescue_detect(&mut self, _view: &align::RgbView<'_>, _tag: &str) -> Option<Detection> {
+        None
     }
 
     pub fn has_mesh(&self) -> bool {
-        self.mesh.is_some()
+        false
     }
 
     fn run_camera_operation<T>(
@@ -4332,16 +4229,8 @@ impl Engine {
         // breach species; IR face-presence does not exist here). Same deny-only
         // 5-median contract as the cross-spectrum path.
         self.check_request_active()?;
-        let rgb_pad = match (verdict, rgb_top.as_ref(), self.vit_pad.as_mut()) {
-            (Verdict::Live, Some(_), None) => PadEvidence::Unavailable,
-            (Verdict::Live, Some(f), Some(pad)) => match pad.p_spoof(&rgb_view, &f.bbox) {
-                Ok(p) if p.is_finite() => PadEvidence::Score(p),
-                Ok(_) => PadEvidence::InferenceFailed,
-                Err(e) => {
-                    irlume_common::dlog!("pad-vit: inference failed ({e})");
-                    PadEvidence::InferenceFailed
-                }
-            },
+        let rgb_pad = match (verdict, rgb_top.as_ref()) {
+            (Verdict::Live, Some(_)) => PadEvidence::Unavailable,
             _ => PadEvidence::NotApplicable,
         };
         self.check_request_active()?;
@@ -5360,26 +5249,8 @@ impl Engine {
         // the 268ms N100 inference is not free (the plan: consent-watch-
         // pipelined, Live frames only).
         self.check_request_active()?;
-        let rgb_pad = match (verdict, rgb_top.as_ref(), self.vit_pad.as_mut()) {
-            (Verdict::Live, Some(_), None) => PadEvidence::Unavailable,
-            (Verdict::Live, Some(f), Some(pad)) => {
-                // Fresh view against the FINAL RGB frame: the self-heal
-                // above may have recaptured it after the view built for
-                // detection.
-                let view = align::RgbView {
-                    data: &rgb.data,
-                    width: rgb.width,
-                    height: rgb.height,
-                };
-                match pad.p_spoof(&view, &f.bbox) {
-                    Ok(p) if p.is_finite() => PadEvidence::Score(p),
-                    Ok(_) => PadEvidence::InferenceFailed,
-                    Err(e) => {
-                        irlume_common::dlog!("pad-vit: inference failed ({e})");
-                        PadEvidence::InferenceFailed
-                    }
-                }
-            }
+        let rgb_pad = match (verdict, rgb_top.as_ref()) {
+            (Verdict::Live, Some(_)) => PadEvidence::Unavailable,
             _ => PadEvidence::NotApplicable,
         };
         self.check_request_active()?;
@@ -12053,28 +11924,9 @@ mod engine_tests {
             // this (nod still works) where a fatal treatment turned "mesh
             // gates off" into "face auth dead" on hosts whose bundled TFLite
             // runtime does not load.
-            let bogus = std::env::temp_dir()
-                .join(format!("irlume-bogus-mesh-{}.tflite", std::process::id()));
-            std::fs::write(&bogus, b"TFL3 this is not a model").unwrap();
-            let (e, err) = e.with_mesh_degraded(&bogus.to_string_lossy());
-            assert!(
-                err.is_some(),
-                "an unloadable mesh must report its error to the caller"
-            );
-            assert!(!e.has_mesh(), "the engine must come back mesh-less");
-            let _ = std::fs::remove_file(&bogus);
             let bogus_pad =
                 std::env::temp_dir().join(format!("irlume-bogus-pad-{}.onnx", std::process::id()));
             std::fs::write(&bogus_pad, b"not an ONNX model").unwrap();
-            let (e, vit_err) = e.with_vit_pad_degraded(&bogus_pad.to_string_lossy());
-            assert!(
-                vit_err.is_some(),
-                "an unloadable RGB PAD must report its error"
-            );
-            assert!(
-                !e.has_vit_pad(),
-                "the engine must come back without RGB PAD"
-            );
             let (e, ir_err) = e.with_pad_ir_degraded(&bogus_pad.to_string_lossy());
             assert!(
                 ir_err.is_some(),
@@ -12084,17 +11936,13 @@ mod engine_tests {
             let _ = std::fs::remove_file(&bogus_pad);
             assert_eq!(e.ir_space(), "raw");
             // A present adapter file flips the IR space to its digest name. Any
-            // valid ONNX serves; `apply` is never called (BlazeFace here).
-            let blaze = model_path("blaze_face_short_range.onnx");
-            let e = e.with_ir_adapter(&blaze).unwrap();
+            // valid ONNX serves; `apply` is never called.
+            let adapter_model = model_path("flir.onnx");
+            let e = e.with_ir_adapter(&adapter_model).unwrap();
             assert!(e.has_ir_adapter());
             let adapter_space = e.ir_space().to_string();
             let mut e = e
-                .with_mesh(&model_path("face_landmark.onnx"))
-                .unwrap()
-                .with_blaze_rescue(&blaze)
-                .unwrap()
-                .with_pad_ir(&blaze)
+                .with_pad_ir(&adapter_model)
                 .unwrap();
             // Shared baseline is the raw (no-adapter) space; tests needing an
             // adapter set one temporarily and restore.
@@ -13076,10 +12924,10 @@ mod engine_tests {
         assert_eq!(e.ir_dim(), irlume_vision::EMBED_DIM);
         assert_eq!(e.ir_space(), "raw");
         // Loaded optional models.
-        assert!(e.has_mesh() && e.has_blaze_rescue() && e.has_pad_ir());
+        assert!(e.has_pad_ir());
         // Adapter space naming: "adapter:" + first 12 hex of the file's sha256,
         // computed independently here from the same bytes.
-        let bytes = std::fs::read(model_path("blaze_face_short_range.onnx")).unwrap();
+        let bytes = std::fs::read(model_path("flir.onnx")).unwrap();
         let digest = irlume_common::sha256_hex(&bytes);
         assert_eq!(s.adapter_space, format!("adapter:{}", &digest[..12]));
         // The engine loaded the shipped glintr100.onnx, so its embedding space
@@ -13240,7 +13088,7 @@ mod engine_tests {
             .is_none());
         // With a global adapter loaded, refit is a no-op: an existing
         // calibration is left untouched and none is fitted.
-        let adapter = Adapter::load_from_file(&model_path("blaze_face_short_range.onnx")).unwrap();
+        let adapter = Adapter::load_from_file(&model_path("flir.onnx")).unwrap();
         s.engine.ir_adapter = Some(adapter);
         let before = prof.ir_calib.clone().unwrap();
         s.engine.refit_profile_calib(&mut prof);
@@ -14694,17 +14542,9 @@ mod engine_tests {
             width: w,
             height: h,
         };
-        // Both rescue models loaded, but no face in the frame.
-        assert!(s.engine.has_blaze_rescue() && s.engine.has_mesh());
+        // Rescue models are no longer used in IR-only mode.
+        assert!(!s.engine.has_blaze_rescue() && !s.engine.has_mesh());
         assert!(s.engine.rescue_detect(&view, "test").is_none());
-        // With BlazeFace missing the cascade stage is simply absent.
-        let blaze = s.engine.blaze.take();
-        assert!(s.engine.rescue_detect(&view, "test").is_none());
-        s.engine.blaze = blaze;
-        // Same when only the mesh refiner is missing.
-        let mesh = s.engine.mesh.take();
-        assert!(s.engine.rescue_detect(&view, "test").is_none());
-        s.engine.mesh = mesh;
     }
 
     #[test]

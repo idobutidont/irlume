@@ -15,10 +15,6 @@ Source0:        %{url}/archive/v%{version}/%{name}-%{version}.tar.gz
 # quota. Packit/Copr fetch remote sources (net-on); verified by sha256 in %prep.
 Source2:        %{url}/releases/download/models-v1/glintr100.onnx
 Source3:        %{url}/releases/download/models-v1/face_detection_yunet_2023mar.onnx
-Source4:        %{url}/releases/download/models-v1/face_landmark.onnx
-Source5:        %{url}/releases/download/models-v1/blaze_face_short_range.onnx
-Source7:        %{url}/releases/download/models-v1/face_landmarks_detector.tflite
-Source8:        %{url}/releases/download/models-v1/liveness_vit.onnx
 Source9:        %{url}/releases/download/models-v1/flir.onnx
 # Bundled onnxruntime runtime (MIT). irlume needs the api-24 ABI (>=1.24);
 # Fedora's own onnxruntime is below that in every release we build for
@@ -27,13 +23,6 @@ Source9:        %{url}/releases/download/models-v1/flir.onnx
 # unbundling when the floor is met across our chroots. Packit/Copr fetch
 # remote sources (net-on).
 Source1:        https://github.com/microsoft/onnxruntime/releases/download/v%{ort_ver}/onnxruntime-linux-x64-%{ort_ver}.tgz
-# Bundled TFLite C runtime (Apache-2.0), for native .tflite models (#295).
-# Google publishes no prebuilt Linux C-API artifact at stable URLs, so irlume
-# builds its own from the pinned tensorflow tag (scripts/build-tflite-runtime.sh)
-# and publishes it on the tflite-runtime-* release; the daemon dlopens it from
-# %%{_datadir}/%%{name}/tflite (the first path its resolver probes), so no env
-# drop-in is needed. Update the digest together with tflite_ver.
-Source6:        %{url}/releases/download/tflite-runtime-%{tflite_ver}/libtensorflowlite_c-%{tflite_ver}-linux-x64.tar.gz
 
 BuildRequires:  cargo
 BuildRequires:  rust
@@ -95,18 +84,8 @@ echo '2529aef968d0ad0603365054bc46ebefa7f0fe3bc12f28c5f729c99ddffe2a81  %{SOURCE
 # Unpack the bundled onnxruntime (Source1) next to the source tree; installed
 # below into %{_datadir}/%{name}/onnxruntime.
 tar -xzf %{SOURCE1}
-# Same verify-then-unpack for the bundled TFLite C runtime (Source6).
-echo 'dd3abcdbc0f35a9466a682358955ac3826a9a81590cd6b8abcf98548e17bd311  %{SOURCE6}' | sha256sum -c -
-tar -xzf %{SOURCE6}
-# Verify the release-hosted model weights (Source2-5) the same way: they load in
-# the privileged daemon, and Copr fetches remote sources without a lookaside
-# checksum. Keep these in sync with models/SHA256SUMS.
 echo 'a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60  %{SOURCE2}' | sha256sum -c -
 echo '8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4  %{SOURCE3}' | sha256sum -c -
-echo '821683be088447839638f79d64268bd501bdb72e5d9e262ec981c7e252956caf  %{SOURCE4}' | sha256sum -c -
-echo 'c5453678015f6289c1d77bda88a8ba9c87574f01de1a05ba1909b9a7e08b237b  %{SOURCE5}' | sha256sum -c -
-echo 'c7d54204ce0448474c7f3fa9af494787c0965cbdd6f20fc72867e43046bd43d5  %{SOURCE7}' | sha256sum -c -
-echo 'c7f8a6f3054b11f9719f5e24d37ec227721608fff8b90373c6c3e7659864161c  %{SOURCE8}' | sha256sum -c -
 echo 'df80cea7228b92562692e56aac965d35766c77399159798c552fb3c77b410c72  %{SOURCE9}' | sha256sum -c -
 
 %build
@@ -134,10 +113,6 @@ install -Dm0644 packaging/pam/irlume-retry-reset %{buildroot}%{_sysconfdir}/pam.
 # Bundled models (release assets, verified in %prep) → /usr/share/irlume/models
 install -Dm0644 %{SOURCE2} %{buildroot}%{_datadir}/%{name}/models/glintr100.onnx
 install -Dm0644 %{SOURCE3} %{buildroot}%{_datadir}/%{name}/models/face_detection_yunet_2023mar.onnx
-install -Dm0644 %{SOURCE4} %{buildroot}%{_datadir}/%{name}/models/face_landmark.onnx
-install -Dm0644 %{SOURCE5} %{buildroot}%{_datadir}/%{name}/models/blaze_face_short_range.onnx
-install -Dm0644 %{SOURCE7} %{buildroot}%{_datadir}/%{name}/models/face_landmarks_detector.tflite
-install -Dm0644 %{SOURCE8} %{buildroot}%{_datadir}/%{name}/models/liveness_vit.onnx
 install -Dm0644 %{SOURCE9} %{buildroot}%{_datadir}/%{name}/models/flir.onnx
 install -Dm0644 packaging/systemd/irlumed.service %{buildroot}%{_unitdir}/irlumed.service
 install -Dm0644 packaging/systemd/irlumed.socket %{buildroot}%{_unitdir}/irlumed.socket
@@ -151,15 +126,6 @@ install -Dm0644 packaging/systemd/irlume-reconcile.timer %{buildroot}%{_unitdir}
 # to preserve the .so version symlinks).
 install -d %{buildroot}%{_datadir}/%{name}/onnxruntime/lib
 cp -a onnxruntime-linux-x64-%{ort_ver}/lib/libonnxruntime.so* %{buildroot}%{_datadir}/%{name}/onnxruntime/lib/
-# Bundled TFLite C runtime; the daemon's resolver probes this path first, so
-# unlike onnxruntime it needs no environment drop-in.
-install -d %{buildroot}%{_datadir}/%{name}/tflite
-install -m0755 libtensorflowlite_c-%{tflite_ver}-linux-x64/lib/libtensorflowlite_c.so %{buildroot}%{_datadir}/%{name}/tflite/libtensorflowlite_c.so
-install -m0644 libtensorflowlite_c-%{tflite_ver}-linux-x64/LICENSE.tensorflow %{buildroot}%{_datadir}/%{name}/tflite/LICENSE.tensorflow
-install -m0644 libtensorflowlite_c-%{tflite_ver}-linux-x64/PROVENANCE %{buildroot}%{_datadir}/%{name}/tflite/PROVENANCE
-# Not all of libtensorflowlite_c.so is Apache-2.0: it statically links Eigen
-# (MPL-2.0), XNNPACK, ruy and others. Name them beside the library.
-install -m0644 packaging/licenses/THIRD-PARTY-NOTICES.tflite %{buildroot}%{_datadir}/%{name}/tflite/THIRD-PARTY-NOTICES
 install -Dm0644 packaging/fedora/10-ort.conf %{buildroot}%{_unitdir}/irlumed.service.d/10-ort.conf
 # tmpfiles.d: the setgid root:video lock directory for the IR-emitter
 # exclusion locks (#542). The daemon's bounding set has no CAP_CHOWN, so the
@@ -274,12 +240,9 @@ restorecon /run/irlume.sock 2>/dev/null || :
 %dir %{_datadir}/%{name}/models
 %dir %{_datadir}/%{name}/onnxruntime
 %dir %{_datadir}/%{name}/onnxruntime/lib
-%dir %{_datadir}/%{name}/tflite
-%{_datadir}/%{name}/tflite/*
 %dir %{_datadir}/%{name}/schemas
 %{_datadir}/%{name}/schemas/*.json
 %{_datadir}/%{name}/models/*.onnx
-%{_datadir}/%{name}/models/*.tflite
 %{_datadir}/%{name}/onnxruntime/lib/*
 %{_unitdir}/irlumed.service
 %{_unitdir}/irlumed.socket

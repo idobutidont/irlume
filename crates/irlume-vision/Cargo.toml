@@ -5,17 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = ["onnx", "tflite"]
-# ONNX inference (AuraFace embedder, YuNet detector). Off => align/cosine only.
-# FaceMesh dispatches to the TFLite backend for the production mesh, so
-# enabling onnx requires the tflite binding (MR !3 review: the independent
-# combination stopped compiling).
-onnx = ["dep:ort", "tflite"]
-# Native TFLite/LiteRT runtime (#295): runs pinned .tflite artifacts
-# unconverted via a dlopen'd libtensorflowlite_c; absence is a recoverable
-# runtime answer, not a build requirement, so the feature costs nothing on
-# systems without the library.
-tflite = ["dep:edgefirst-tflite"]
+default = ["onnx"]
+# ONNX inference (ArcFace embedder, YuNet detector, FLIR PAD). Off => align/cosine only.
+onnx = ["dep:ort"]
 # Hardware-acceleration execution providers, selected at compile time (cf. howrs).
 # Default build = CPU. The heavy math runs inside ONNX Runtime, already SIMD +
 # multi-threaded; these pick the EP. Our own glue loops vectorize via target-cpu
@@ -30,20 +22,11 @@ libc.workspace = true   # dlopen/dlsym probe: prove a library is loadable ort BE
 irlume-common.workspace = true
 thiserror.workspace = true
 ort = { workspace = true, optional = true }
-# Pinned EXACTLY: wrapper 0.10.1 and locked sys 0.10.2 are reviewed in
-# docs/research/tflite-0.10.1-audit.md. Default-off drops ZIP/metadata features,
-# but FlatBuffers is now unconditional. Our post-hash layout guard refuses
-# offset-stored buffers before the loader can repack the verified allocation.
-edgefirst-tflite = { version = "=0.10.1", optional = true, default-features = false }
 rustfft.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
 tempfile = "3"
-
-[[example]]
-name = "tflite_runtime_probe"
-required-features = ["tflite"]
 
 [lints]
 workspace = true

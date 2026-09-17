@@ -45,9 +45,5 @@ verify_or_fetch() {
 mkdir -p "$DEST"
 verify_or_fetch glintr100.onnx                   a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60
 verify_or_fetch face_detection_yunet_2023mar.onnx 8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4
-verify_or_fetch face_landmark.onnx               821683be088447839638f79d64268bd501bdb72e5d9e262ec981c7e252956caf
-verify_or_fetch blaze_face_short_range.onnx      c5453678015f6289c1d77bda88a8ba9c87574f01de1a05ba1909b9a7e08b237b
-verify_or_fetch face_landmarks_detector.tflite    c7d54204ce0448474c7f3fa9af494787c0965cbdd6f20fc72867e43046bd43d5
-verify_or_fetch liveness_vit.onnx                 c7f8a6f3054b11f9719f5e24d37ec227721608fff8b90373c6c3e7659864161c
 verify_or_fetch flir.onnx                         df80cea7228b92562692e56aac965d35766c77399159798c552fb3c77b410c72
 echo "fetch-models: all model weights present in $DEST"

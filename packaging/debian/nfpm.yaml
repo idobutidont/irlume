@@ -91,30 +91,11 @@ contents:
     dst: /usr/share/irlume/models/glintr100.onnx
   - src: ../../models/face_detection_yunet_2023mar.onnx
     dst: /usr/share/irlume/models/face_detection_yunet_2023mar.onnx
-  - src: ../../models/face_landmark.onnx
-    dst: /usr/share/irlume/models/face_landmark.onnx
-  - src: ../../models/face_landmarks_detector.tflite
-    dst: /usr/share/irlume/models/face_landmarks_detector.tflite
-  - src: ../../models/blaze_face_short_range.onnx
-    dst: /usr/share/irlume/models/blaze_face_short_range.onnx
-  - src: ../../models/liveness_vit.onnx
-    dst: /usr/share/irlume/models/liveness_vit.onnx
   - src: ../../models/flir.onnx
     dst: /usr/share/irlume/models/flir.onnx
   # Bundled onnxruntime (>=1.24) staged by build-deb.sh
   - src: ../../.deb-staging/onnxruntime/lib/
     dst: /opt/irlume/onnxruntime/lib/
-  # Bundled TFLite C runtime staged by build-deb.sh (#295); the daemon's
-  # resolver probes /usr/share/irlume/tflite, so it ships at the probed path
-  # rather than /opt.
-  - src: ../../.deb-staging/tflite/lib/libtensorflowlite_c.so
-    dst: /usr/share/irlume/tflite/libtensorflowlite_c.so
-  - src: ../../.deb-staging/tflite/LICENSE.tensorflow
-    dst: /usr/share/irlume/tflite/LICENSE.tensorflow
-  - src: ../licenses/THIRD-PARTY-NOTICES.tflite
-    dst: /usr/share/irlume/tflite/THIRD-PARTY-NOTICES
-  - src: ../../.deb-staging/tflite/PROVENANCE
-    dst: /usr/share/irlume/tflite/PROVENANCE
   # systemd unit + an override pointing ORT at the bundled lib
   - src: ../systemd/irlumed.service
     dst: /usr/lib/systemd/system/irlumed.service

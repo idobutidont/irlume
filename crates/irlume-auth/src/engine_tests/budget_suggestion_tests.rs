@@ -37,26 +37,20 @@ impl Drop for Environment {
 struct ReadyEngine<'a> {
     engine: &'a mut Engine,
     old_ir: bool,
-    old_vit: Option<irlume_vision::PadVit>,
 }
 impl<'a> ReadyEngine<'a> {
     fn new(engine: &'a mut Engine) -> Self {
-        let model =
-            irlume_vision::PadVit::load_from_file(&model_path("liveness_vit.onnx")).unwrap();
-        let old_vit = engine.vit_pad.replace(model);
         let old_ir = std::mem::replace(&mut engine.ir_available, true);
         assert!(engine.has_pad_ir());
         Self {
             engine,
             old_ir,
-            old_vit,
         }
     }
 }
 impl Drop for ReadyEngine<'_> {
     fn drop(&mut self) {
         self.engine.ir_available = self.old_ir;
-        self.engine.vit_pad = self.old_vit.take();
     }
 }
 
@@ -130,21 +124,7 @@ fn budget_hint_is_not_evaluated_for_excluded_requests() {
     );
     assert_eq!(window.milliseconds, 5_000);
     ready.engine.ir_available = true;
-    let old_vit = ready.engine.vit_pad.take();
-    let calls = Cell::new(0);
-    let window = ready.engine.authentication_window_from_with_hint(
-        Instant::now(),
-        Some("sudo"),
-        AuthenticationPurpose::Verify,
-        Dual,
-        || {
-            calls.set(calls.get() + 1);
-            true
-        },
-    );
-    ready.engine.vit_pad = old_vit;
-    assert_eq!(calls.get(), 0);
-    assert_eq!(window.milliseconds, 5_000);
+
     let old_ir_pad = ready.engine.pad_ir.take();
     let window = ready.engine.authentication_window_from_with_hint(
         Instant::now(),

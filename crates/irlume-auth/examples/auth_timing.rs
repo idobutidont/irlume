@@ -106,9 +106,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut auxiliary = Vec::new();
     for (key, filename) in [
         ("IRLUME_IR_ADAPTER", "ir_adapter.onnx"),
-        ("IRLUME_MESH_MODEL", "face_landmarks_detector.tflite"),
-        ("IRLUME_BLAZE_MODEL", "blaze_face_short_range.onnx"),
-        ("IRLUME_VIT_PAD_MODEL", "liveness_vit.onnx"),
         ("IRLUME_PAD_IR_MODEL", "flir.onnx"),
     ] {
         let explicit = std::env::var_os(key);
@@ -137,9 +134,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let path = path.to_str().ok_or("model path must be UTF-8")?;
                 engine = match *key {
                     "IRLUME_IR_ADAPTER" => engine.with_ir_adapter(path)?,
-                    "IRLUME_MESH_MODEL" => engine.with_mesh(path)?,
-                    "IRLUME_BLAZE_MODEL" => engine.with_blaze_rescue(path)?,
-                    "IRLUME_VIT_PAD_MODEL" => engine.with_vit_pad(path)?,
                     "IRLUME_PAD_IR_MODEL" => engine.with_pad_ir(path)?,
                     _ => unreachable!("fixed auxiliary model list"),
                 };

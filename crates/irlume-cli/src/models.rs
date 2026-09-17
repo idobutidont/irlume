@@ -43,12 +43,6 @@ pub(crate) fn stage_statuses() -> Vec<StageStatus> {
             "IRLUME_DET_MODEL",
             true,
         ),
-        (
-            "landmarks",
-            "face_landmarks_detector.tflite",
-            "IRLUME_MESH_MODEL",
-            false,
-        ),
         ("recognition", "glintr100.onnx", "IRLUME_MODEL", true),
     ]
     .into_iter()
@@ -123,7 +117,6 @@ mod tests {
         .expect("packaging/systemd/irlumed.service readable from the workspace");
         let env_for = [
             ("detection", "IRLUME_DET_MODEL"),
-            ("landmarks", "IRLUME_MESH_MODEL"),
             ("recognition", "IRLUME_MODEL"),
         ];
         for stage in stage_statuses() {

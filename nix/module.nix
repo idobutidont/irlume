@@ -301,15 +301,6 @@ in
         ORT_DYLIB_PATH = "${onnxruntime-bin}/lib/libonnxruntime.so";
         IRLUME_DET_MODEL = "${models}/face_detection_yunet_2023mar.onnx";
         IRLUME_MODEL = "${models}/glintr100.onnx";
-        # Nix does not yet package libtensorflowlite_c.so (docs/NIXOS.md), so
-        # this lane keeps the pinned ONNX conversion as its production mesh
-        # until the runtime dependency is wired. The mesh remains dense-landmark
-        # infrastructure for BlazeFace rescue alignment; every FHS lane runs the
-        # native default.
-        IRLUME_MESH_MODEL = "${models}/face_landmark.onnx";
-        IRLUME_BLAZE_MODEL = "${models}/blaze_face_short_range.onnx";
-        # PAD cues are shipped in the package, not the daemon's /etc defaults.
-        IRLUME_VIT_PAD_MODEL = "${models}/liveness_vit.onnx";
         IRLUME_PAD_IR_MODEL = "${models}/flir.onnx";
         IRLUME_SOCKET = "/run/irlume.sock";
         IRLUME_RGB_DEVICE = cfg.rgbDevice;

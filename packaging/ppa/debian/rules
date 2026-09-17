@@ -64,14 +64,6 @@ override_dh_auto_install:
 		debian/irlume/usr/share/irlume/models/glintr100.onnx
 	install -D -m0644 models/face_detection_yunet_2023mar.onnx \
 		debian/irlume/usr/share/irlume/models/face_detection_yunet_2023mar.onnx
-	install -D -m0644 models/face_landmark.onnx \
-		debian/irlume/usr/share/irlume/models/face_landmark.onnx
-	install -D -m0644 models/face_landmarks_detector.tflite \
-		debian/irlume/usr/share/irlume/models/face_landmarks_detector.tflite
-	install -D -m0644 models/blaze_face_short_range.onnx \
-		debian/irlume/usr/share/irlume/models/blaze_face_short_range.onnx
-	install -D -m0644 models/liveness_vit.onnx \
-		debian/irlume/usr/share/irlume/models/liveness_vit.onnx
 	install -D -m0644 models/flir.onnx \
 		debian/irlume/usr/share/irlume/models/flir.onnx
 # The machine-API JSON Schema. Fedora, Arch, Debian-nfpm and Nix all ship it and
@@ -81,13 +73,6 @@ override_dh_auto_install:
 		debian/irlume/usr/share/irlume/schemas/machine-api-v1.schema.json
 	mkdir -p debian/irlume/opt/irlume/onnxruntime
 	cp -a ort-prebuilt/lib debian/irlume/opt/irlume/onnxruntime/
-	# Bundled TFLite C runtime (#295): installed at the resolver's first
-	# probed path, so no environment wiring is needed.
-	install -d debian/irlume/usr/share/irlume/tflite
-	install -m0755 tflite-prebuilt/lib/libtensorflowlite_c.so debian/irlume/usr/share/irlume/tflite/
-	install -m0644 tflite-prebuilt/LICENSE.tensorflow debian/irlume/usr/share/irlume/tflite/
-	install -m0644 tflite-prebuilt/PROVENANCE debian/irlume/usr/share/irlume/tflite/
-	install -m0644 packaging/licenses/THIRD-PARTY-NOTICES.tflite debian/irlume/usr/share/irlume/tflite/THIRD-PARTY-NOTICES
 	install -D -m0644 packaging/systemd/irlumed.service \
 		debian/irlume/usr/lib/systemd/system/irlumed.service
 	# Makes /run/irlume.sock exist before the greeter authenticates (#244).

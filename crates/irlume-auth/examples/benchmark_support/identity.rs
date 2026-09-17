@@ -67,9 +67,8 @@ pub fn runtimes() -> Result<(), Box<dyn std::error::Error>> {
         verdict?
     );
     println!(
-        "runtime_selection: ORT_DYLIB_PATH={:?} IRLUME_TFLITE_LIB={:?}",
-        std::env::var_os("ORT_DYLIB_PATH"),
-        std::env::var_os("IRLUME_TFLITE_LIB")
+        "runtime_selection: ORT_DYLIB_PATH={:?}",
+        std::env::var_os("ORT_DYLIB_PATH")
     );
     println!("execution_provider=not-observed; record Cargo features; production wrappers may fall back to CPU");
     // Linux maps identify the actual loaded files even when the resolver uses
@@ -80,8 +79,7 @@ pub fn runtimes() -> Result<(), Box<dyn std::error::Error>> {
         .filter_map(|line| {
             let path = &line[line.find('/')?..];
             let name = Path::new(path).file_name()?.to_str()?;
-            (name.starts_with("libonnxruntime.so") || name.starts_with("libtensorflowlite_c.so"))
-                .then_some(path)
+            name.starts_with("libonnxruntime.so").then_some(path)
         })
         .collect();
     if paths.is_empty() {

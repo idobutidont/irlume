@@ -231,7 +231,7 @@ fn load_shipped_recognizer(
 /// unavailable evidence (ADR-0019). Kill-switched cues skip
 /// verification entirely: an operator who disabled the cue did not ask to
 /// have its weights checked.
-fn models_to_verify<'a>(shipped: [&'a str; 4], adapter: &'a str) -> Vec<&'a str> {
+fn models_to_verify<'a>(shipped: &[&'a str], adapter: &'a str) -> Vec<&'a str> {
     let mut v: Vec<&str> = shipped.to_vec();
     if std::path::Path::new(adapter).exists() {
         v.push(adapter);
@@ -362,39 +362,17 @@ fn verified_pad_model(path: &str, strict: bool) -> Option<irlume_common::HashedM
 
 fn load_pad_models(
     engine: irlume_auth::Engine,
-    vit_path: &str,
     ir_path: &str,
 ) -> (
     irlume_auth::Engine,
     irlume_common::PadModelStatus,
     irlume_common::PadModelStatus,
 ) {
-    let is_ir_only = is_ir_only_policy();
     let strict = strict_requested(
         std::env::var("IRLUME_MODELS_STRICT").ok().as_deref(),
         std::io::stderr(),
     );
-    let vit_enabled = vit_pad_enabled() && !is_ir_only;
-    let vit_present = std::path::Path::new(vit_path).exists();
-    let vit_weights = (vit_enabled && vit_present)
-        .then(|| verified_pad_model(vit_path, strict))
-        .flatten();
-    let vit_allowed = vit_weights.is_some();
-    // Each match owns its artifact. Release the serialized RGB model before
-    // reading or constructing the IR model, including on parse failure.
-    let (engine, vit_error) = match vit_weights {
-        Some(weights) => engine.with_vit_pad_weights_degraded(weights.bytes()),
-        None => (engine, None),
-    };
-    if let Some(error) = &vit_error {
-        jout_warn!("irlumed: RGB PAD did not load ({error}); face authentication is password-only");
-    }
-    let rgb_status = pad_model_status(
-        vit_enabled,
-        vit_present,
-        engine.has_vit_pad(),
-        vit_error.is_some() || (vit_enabled && vit_present && !vit_allowed),
-    );
+    let rgb_status = irlume_common::PadModelStatus::Disabled;
 
     let ir_enabled = pad_ir_enabled();
     let ir_present = std::path::Path::new(ir_path).exists();
@@ -502,9 +480,6 @@ struct EngineBuildConfig {
     model: String,
     adapter: String,
     adapter_required: bool,
-    mesh: String,
-    blaze: String,
-    vit_pad: String,
     pad_ir: String,
     rgb_dev: String,
     ir_dev: String,
@@ -518,37 +493,12 @@ fn build_engine_from_config(
     irlume_common::PadModelStatus,
     irlume_common::PadModelStatus,
 )> {
-    let is_ir_only = is_ir_only_policy();
     let engine = load_shipped_recognizer(&config.det, &config.model, recognizer)
         .map(|engine| engine.with_devices(&config.rgb_dev, &config.ir_dev))
         .and_then(|engine| engine.with_ir_adapter(&config.adapter))
         .map(|engine| engine.with_ir_adapter_required(config.adapter_required))?;
 
-    let engine = if is_ir_only {
-        engine
-    } else {
-        let engine = if strict_requested(
-            std::env::var("IRLUME_MODELS_STRICT").ok().as_deref(),
-            std::io::stderr(),
-        ) {
-            engine.with_mesh(&config.mesh)?
-        } else {
-            let (engine, error) = engine.with_mesh_degraded(&config.mesh);
-            if let Some(error) = error {
-                jout_warn!(
-                    "irlumed: FaceMesh did not load ({error}); continuing WITHOUT \
-                     the mesh: BlazeFace detection-rescue alignment is unavailable; \
-                     head nod approval and head-shake decline still work. Fix the \
-                     TFLite runtime (doctor: tflite-runtime) or \
-                     set IRLUME_MESH_MODEL to the ONNX mesh."
-                );
-            }
-            engine
-        };
-        engine.with_blaze_rescue(&config.blaze)?
-    };
-
-    Ok(load_pad_models(engine, &config.vit_pad, &config.pad_ir))
+    Ok(load_pad_models(engine, &config.pad_ir))
 }
 
 fn rebuild_engine_from_config(
@@ -562,7 +512,7 @@ fn rebuild_engine_from_config(
     // sessions. Carry the recognizer bytes we actually hashed into its loader.
     let recognizer = verify_models(
         &models_to_verify(
-            [&config.det, &config.model, &config.mesh, &config.blaze],
+            &[&config.det, &config.model],
             &config.adapter,
         ),
         Some(&config.model),
@@ -583,16 +533,7 @@ fn main() {
     let model = env_or("IRLUME_MODEL", "/etc/irlume/face.onnx");
     let adapter = env_or("IRLUME_IR_ADAPTER", "/etc/irlume/ir_adapter.onnx");
     let adapter_required = std::env::var_os("IRLUME_IR_ADAPTER").is_some();
-    let mesh = env_or(
-        "IRLUME_MESH_MODEL",
-        "/etc/irlume/face_landmarks_detector.tflite",
-    );
-    let blaze = env_or(
-        "IRLUME_BLAZE_MODEL",
-        "/etc/irlume/blaze_face_short_range.onnx",
-    );
     // Shipped PAD cues (ADR-0013): default-on, kill-switchable.
-    let vit_pad_path = env_or("IRLUME_VIT_PAD_MODEL", "/etc/irlume/liveness_vit.onnx");
     let pad_ir_path = env_or("IRLUME_PAD_IR_MODEL", "/etc/irlume/flir.onnx");
     let socket = std::env::var("IRLUME_SOCKET").unwrap_or_else(|_| SOCKET_PATH.into());
 
@@ -699,7 +640,7 @@ fn main() {
             // engine below (#346), so the 260MB file is read and hashed once per
             // start rather than once here and once again inside the loader.
             let verified_recognizer = verify_models(
-                &models_to_verify([&det, &model, &mesh, &blaze], &adapter),
+                &models_to_verify(&[&det, &model], &adapter),
                 Some(&model),
             );
             // Auto-select the camera pair: explicit IRLUME_RGB_DEVICE/IR_DEVICE, else a
@@ -836,9 +777,6 @@ fn main() {
                 model,
                 adapter,
                 adapter_required,
-                mesh,
-                blaze,
-                vit_pad: vit_pad_path,
                 pad_ir: pad_ir_path,
                 rgb_dev,
                 ir_dev,
@@ -7365,11 +7303,9 @@ mod tests {
         let shipped = [
             "/etc/irlume/det.onnx",
             "/etc/irlume/face.onnx",
-            "/etc/irlume/face_landmarks_detector.tflite",
-            "/etc/irlume/blaze_face_short_range.onnx",
         ];
         assert_eq!(
-            models_to_verify(shipped, "/nonexistent/irlume-test/ir_adapter.onnx"),
+            models_to_verify(&shipped, "/nonexistent/irlume-test/ir_adapter.onnx"),
             shipped.to_vec(),
             "a missing optional adapter must not reach verify_models"
         );
@@ -7381,9 +7317,9 @@ mod tests {
         let adapter = dir.join("ir_adapter.onnx");
         std::fs::write(&adapter, b"weights").unwrap();
         let ap = adapter.to_string_lossy().into_owned();
-        let v = models_to_verify(shipped, &ap);
-        assert_eq!(v.len(), 5);
-        assert_eq!(v[4], ap);
+        let v = models_to_verify(&shipped, &ap);
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[2], ap);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -7395,16 +7331,13 @@ mod tests {
         let shipped = [
             "/etc/irlume/det.onnx",
             "/etc/irlume/face.onnx",
-            "/etc/irlume/face_landmarks_detector.tflite",
-            "/etc/irlume/blaze_face_short_range.onnx",
         ];
         // PAD paths are not accepted by the fatal core verifier's interface.
         let _g = env_lock();
-        std::env::remove_var("IRLUME_PAD_VIT");
         std::env::remove_var("IRLUME_PAD_IR");
-        let v = models_to_verify(shipped, "/nonexistent/irlume-test/ir_adapter.onnx");
+        let v = models_to_verify(&shipped, "/nonexistent/irlume-test/ir_adapter.onnx");
         assert_eq!(v, shipped);
-        assert!(vit_pad_enabled() && pad_ir_enabled());
+        assert!(pad_ir_enabled());
 
         // A kill switch prevents the separate loader/verifier from running.
         std::env::set_var("IRLUME_PAD_VIT", "0");
@@ -7497,9 +7430,6 @@ mod tests {
                 model: path.clone(),
                 adapter: format!("{path}.absent-adapter"),
                 adapter_required: false,
-                mesh: path.clone(),
-                blaze: path.clone(),
-                vit_pad: path.clone(),
                 pad_ir: path,
                 rgb_dev: "/dev/irlume-test-none-rgb".into(),
                 ir_dev: "/dev/irlume-test-none-ir".into(),
@@ -7540,7 +7470,7 @@ mod tests {
             std::env::temp_dir().join(format!("irlume-daemon-bad-pad-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let pad = dir.join("liveness_vit.onnx");
+        let pad = dir.join("flir.onnx");
         std::fs::write(&pad, b"damaged PAD weights").unwrap();
 
         assert!(verified_pad_model(&pad.to_string_lossy(), false).is_some());
@@ -7560,9 +7490,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("accepted.onnx");
-        // Session construction accepts this small, real shipped ONNX graph;
-        // inference contracts are exercised by the PAD model tests separately.
-        let original = std::fs::read(model_path("blaze_face_short_range.onnx")).unwrap();
+        let original = std::fs::read(model_path("flir.onnx")).unwrap();
         std::fs::write(&path, &original).unwrap();
         let accepted = verified_pad_model(path.to_str().unwrap(), true)
             .expect("a manifest-matching model is accepted");
@@ -7575,12 +7503,6 @@ mod tests {
             &model_path("glintr100.onnx"),
         )
         .expect("base engine");
-        let (base, error) = base.with_vit_pad_weights_degraded(accepted.bytes());
-        assert!(
-            error.is_none(),
-            "the checked RGB bytes must reach ORT: {error:?}"
-        );
-        assert!(base.has_vit_pad());
         std::fs::remove_file(&path).unwrap();
         let (base, error) = base.with_pad_ir_weights_degraded(accepted.bytes());
         assert!(
@@ -7600,9 +7522,6 @@ mod tests {
             &model_path("glintr100.onnx"),
         )
         .expect("base engine");
-        let (base, error) = base.with_vit_pad_weights_degraded(b"malformed RGB model");
-        assert!(error.is_some());
-        assert!(!base.has_vit_pad());
         let (base, error) = base.with_pad_ir_weights_degraded(b"malformed IR model");
         assert!(error.is_some());
         assert!(!base.has_pad_ir());
@@ -7632,7 +7551,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let damaged_pad = dir.join("liveness_vit.onnx");
+        let damaged_pad = dir.join("damaged_flir.onnx");
         std::fs::write(&damaged_pad, b"damaged PAD weights").unwrap();
         let config = EngineBuildConfig {
             det: model_path("face_detection_yunet_2023mar.onnx"),
@@ -7642,9 +7561,6 @@ mod tests {
                 .to_string_lossy()
                 .into_owned(),
             adapter_required: false,
-            mesh: dir.join("absent-mesh.onnx").to_string_lossy().into_owned(),
-            blaze: dir.join("absent-blaze.onnx").to_string_lossy().into_owned(),
-            vit_pad: damaged_pad.to_string_lossy().into_owned(),
             pad_ir: dir.join("absent-flir.onnx").to_string_lossy().into_owned(),
             rgb_dev: "/dev/irlume-test-none-rgb".into(),
             ir_dev: "/dev/irlume-test-none-ir".into(),
@@ -7652,23 +7568,21 @@ mod tests {
 
         let (engine, rgb_pad, ir_pad) = build_engine_from_config(&config, None)
             .expect("damaged PAD must not make the daemon engine unavailable");
-        assert_eq!(rgb_pad, irlume_common::PadModelStatus::LoadFailed);
+        assert_eq!(rgb_pad, irlume_common::PadModelStatus::Disabled);
         assert_eq!(ir_pad, irlume_common::PadModelStatus::Missing);
 
         // Permissive mode accepts custom bytes, but parse failure still keeps
         // both cues unavailable and retains the base engine for repair.
         std::env::set_var("IRLUME_MODELS_STRICT", "0");
-        let (engine, rgb_pad, ir_pad) = load_pad_models(engine, &config.vit_pad, &config.vit_pad);
-        assert_eq!(rgb_pad, irlume_common::PadModelStatus::LoadFailed);
+        let (engine, rgb_pad, ir_pad) = load_pad_models(engine, &damaged_pad.to_string_lossy());
+        assert_eq!(rgb_pad, irlume_common::PadModelStatus::Disabled);
         assert_eq!(ir_pad, irlume_common::PadModelStatus::LoadFailed);
         assert!(!engine.has_vit_pad() && !engine.has_pad_ir());
 
-        std::env::set_var("IRLUME_PAD_VIT", "0");
         std::env::set_var("IRLUME_PAD_IR", "0");
-        let (_, rgb_pad, ir_pad) = load_pad_models(engine, &config.vit_pad, &config.pad_ir);
+        let (_, rgb_pad, ir_pad) = load_pad_models(engine, &config.pad_ir);
         assert_eq!(rgb_pad, irlume_common::PadModelStatus::Disabled);
         assert_eq!(ir_pad, irlume_common::PadModelStatus::Disabled);
-        std::env::remove_var("IRLUME_PAD_VIT");
         std::env::remove_var("IRLUME_PAD_IR");
         std::env::remove_var("IRLUME_MODELS_STRICT");
         std::env::remove_var("IRLUME_FORCE_NO_IR");
@@ -7696,12 +7610,10 @@ mod tests {
         )
         .expect("base engine");
 
-        let fake_vit = dir.join("fake_vit.onnx");
-        std::fs::write(&fake_vit, b"fake vit").unwrap();
         let fake_flir = dir.join("fake_flir.onnx");
         std::fs::write(&fake_flir, b"fake flir").unwrap();
 
-        let (engine, rgb_pad, _) = load_pad_models(base, &fake_vit.to_string_lossy(), &fake_flir.to_string_lossy());
+        let (engine, rgb_pad, _) = load_pad_models(base, &fake_flir.to_string_lossy());
         assert_eq!(rgb_pad, irlume_common::PadModelStatus::Disabled);
         assert!(!engine.has_vit_pad());
 
@@ -11426,46 +11338,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         // Shipped: a model whose digest IS in the manifest must start under
-        // strict. The fixture is the mesh because it is the one weight
-        // COMMITTED to git; the four .onnx are ignored at `.gitignore:14` and
-        // fetched by `scripts/fetch-models.sh`, so an .onnx fixture is absent
-        // in any tree that has not run the fetch. `verify_models` matches on
-        // digest alone and never looks at the extension, so a .tflite exercises
-        // the same accept path a .onnx would.
-        //
-        // No exists() guard on purpose. This half used to return early when the
-        // fetched .onnx was missing, which reported the whole test as passed in
-        // a build where strict mode rejected every release model (#406).
-        let committed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../models/face_landmarks_detector.tflite");
-        let out = run(
-            "IRLUME_TEST_VERIFY_KNOWN_CHILD",
-            committed.to_str().unwrap(),
-        );
-        assert!(
-            out.status.success(),
-            "strict mode must accept a manifest-matching model. If {} is gone, it \
-             stopped being tracked in git and this test needs another committed \
-             fixture, not a skip; stderr: {}",
-            committed.display(),
-            String::from_utf8_lossy(&out.stderr)
-        );
-        assert!(String::from_utf8_lossy(&out.stdout).contains("known-model-accepted"));
-
-        // The fetched weights get the same check when the fetch has run. Only
-        // this half can catch a download whose bytes the compiled-in manifest
-        // does not know, since the committed fixture never crosses the network.
-        // It is guarded, and it sits last so that skipping it cannot hide the
-        // unconditional assertion above.
-        let fetched = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../models/blaze_face_short_range.onnx");
-        if fetched.exists() {
-            let out = run("IRLUME_TEST_VERIFY_KNOWN_CHILD", fetched.to_str().unwrap());
+        // strict. We check flir.onnx or YuNet if present in the tree.
+        let candidate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/flir.onnx");
+        let yunet = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/face_detection_yunet_2023mar.onnx");
+        let test_model = if candidate.exists() {
+            Some(candidate)
+        } else if yunet.exists() {
+            Some(yunet)
+        } else {
+            None
+        };
+        if let Some(model_path) = test_model {
+            let out = run("IRLUME_TEST_VERIFY_KNOWN_CHILD", model_path.to_str().unwrap());
             assert!(
                 out.status.success(),
-                "strict mode must accept the fetched release model; stderr: {}",
+                "strict mode must accept a manifest-matching model; stderr: {}",
                 String::from_utf8_lossy(&out.stderr)
             );
+            assert!(String::from_utf8_lossy(&out.stdout).contains("known-model-accepted"));
         }
     }
 

@@ -900,12 +900,6 @@ impl Probes {
                 .iter()
                 .any(|p| std::path::Path::new(p).exists());
         v.push(ort_fallback_check(ort));
-        v.push(tflite_fallback_check(
-            std::env::var(irlume_vision::tflite::TFLITE_LIB_ENV)
-                .ok()
-                .as_deref(),
-            |p| p.exists(),
-        ));
 
         // Resolve models the way the daemon does (env → /usr/share/irlume/models
         // → repo cwd), NOT just cwd-relative; a packaged install keeps them in
@@ -2472,29 +2466,7 @@ impl App {
                 pad_detail,
                 pad_fix,
             ));
-            // The mesh ships as a .tflite (#295) and the packaged unit points
-            // IRLUME_MESH_MODEL at it, so a running daemon reporting the mesh
-            // is the ground truth that the TFLite runtime loaded, the same way
-            // Health answers for ONNX. A daemon running WITHOUT the mesh loses
-            // BlazeFace rescue alignment; authentication uses the primary
-            // detector's five landmarks and remains available.
-            v.push(mk(
-                "TFLite runtime",
-                if h.mesh { Sev::Ok } else { Sev::Warn },
-                if h.mesh {
-                    "loaded (the daemon reports FaceMesh, which ships as a .tflite)".into()
-                } else {
-                    "FaceMesh is not loaded: BlazeFace rescue alignment is unavailable".into()
-                },
-                if h.mesh {
-                    Fix::None
-                } else {
-                    Fix::Manual(
-                        "check IRLUME_MESH_MODEL in the irlumed unit, or reinstall the package"
-                            .into(),
-                    )
-                },
-            ));
+
             // Camera row from the daemon's validated tier (never the raw fallback).
             let priv_on = self.current_inventory().is_some()
                 && self.source_usable(Source::CameraPrivacy)
@@ -9237,56 +9209,7 @@ fn ort_fallback_check(found: bool) -> Check {
     }
 }
 
-/// The TFLite mirror of [`ort_fallback_check`], with one extra state: an
-/// explicit `IRLUME_TFLITE_LIB` override is the WHOLE candidate list (the
-/// resolver refuses to fall through a broken override), so an override
-/// pointing at a missing file is an operator error this environment CAN see,
-/// and that one is a Fail rather than the not-seen Warn. Existence only, no
-/// dlopen: the TUI runs unconfined and a load that succeeds here can still
-/// fail under the daemon's AppArmor profile, so "found" is the strongest
-/// claim a local probe can honestly make.
-fn tflite_fallback_check(
-    env_override: Option<&str>,
-    exists: impl Fn(&std::path::Path) -> bool,
-) -> Check {
-    let candidates = irlume_vision::tflite::tflite_lib_candidates(env_override, &exists);
-    let (sev, detail, fix) = match (env_override, candidates.first()) {
-        (Some(_), Some(p)) if exists(p) => (
-            Sev::Ok,
-            format!("override found at {}", p.display()),
-            Fix::None,
-        ),
-        (Some(_), Some(p)) => (
-            Sev::Fail,
-            format!(
-                "IRLUME_TFLITE_LIB points at {}, which does not exist",
-                p.display()
-            ),
-            Fix::Manual("fix or unset IRLUME_TFLITE_LIB; the resolver refuses to fall through a broken override".into()),
-        ),
-        (None, Some(p)) => (
-            Sev::Ok,
-            format!("library found at {}", p.display()),
-            Fix::None,
-        ),
-        _ => (
-            Sev::Warn,
-            "not seen by a local probe; the daemon's unit may set its own path".into(),
-            Fix::Manual(
-                "install the irlume package's TFLite runtime (it ships at \
-                 /usr/share/irlume/tflite/libtensorflowlite_c.so), or set \
-                 IRLUME_TFLITE_LIB in the irlumed unit"
-                    .into(),
-            ),
-        ),
-    };
-    Check {
-        label: "TFLite runtime".into(),
-        sev,
-        detail,
-        fix,
-    }
-}
+
 
 // ---- async response mappers (Response -> (ok, message)) -------------------
 
@@ -15847,52 +15770,7 @@ mod tests {
 
     /// The four TFLite states, driven through the injected `exists` so no
     /// test depends on what this machine has installed. The one that differs
-    /// from ONNX: a broken override is an operator error THIS environment can
-    /// see, so it is a Fail, not the not-seen Warn.
-    #[test]
-    fn tflite_fallback_check_distinguishes_override_packaged_and_absent() {
-        let ok_override = tflite_fallback_check(Some("/opt/x/libtensorflowlite_c.so"), |_| true);
-        assert!(ok_override.sev == Sev::Ok, "{}", ok_override.detail);
-        assert!(
-            ok_override.detail.contains("/opt/x/"),
-            "{}",
-            ok_override.detail
-        );
 
-        let bad_override = tflite_fallback_check(Some("/opt/x/libtensorflowlite_c.so"), |_| false);
-        assert!(
-            bad_override.sev == Sev::Fail,
-            "a set-but-missing override is not a guess: {}",
-            bad_override.detail
-        );
-        assert!(
-            bad_override.detail.contains("does not exist"),
-            "{}",
-            bad_override.detail
-        );
-
-        let packaged = tflite_fallback_check(None, |p| {
-            p == std::path::Path::new("/usr/share/irlume/tflite/libtensorflowlite_c.so")
-        });
-        assert!(packaged.sev == Sev::Ok, "{}", packaged.detail);
-        assert!(
-            packaged.detail.contains("/usr/share/irlume/tflite"),
-            "{}",
-            packaged.detail
-        );
-
-        let absent = tflite_fallback_check(None, |_| false);
-        assert!(
-            absent.sev == Sev::Warn,
-            "nothing seen is a guess about the daemon's env, same as ONNX: {}",
-            absent.detail
-        );
-        assert!(absent.detail.contains("local probe"), "{}", absent.detail);
-        assert!(
-            matches!(&absent.fix, Fix::Manual(m) if m.contains("IRLUME_TFLITE_LIB")),
-            "the fix must name both remedies"
-        );
-    }
 
     #[test]
     fn repair_reports_the_daemons_seal_tier_not_the_weakest_rung() {
