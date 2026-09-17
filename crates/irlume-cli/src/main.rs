@@ -116,7 +116,7 @@ fn main() -> std::process::ExitCode {
     if let Some(named) = flag(&args, "--user").filter(|s| !s.is_empty()) {
         if !irlume_common::platform::user_exists(named) {
             eprintln!(
-                "irlume: note: no user '{named}' on this system, so its per-user state reads as empty"
+                "irlume: note: user '{named}' not found on system"
             );
         }
     }
@@ -128,8 +128,7 @@ fn main() -> std::process::ExitCode {
     if let Some(cmd) = args.first().map(String::as_str) {
         if DEV_CMDS.contains(&cmd) && !daemon_selftest && std::env::var_os("IRLUME_DEV").is_none() {
             eprintln!(
-                "[irlume] '{cmd}' is a developer/benchmark tool (opens the camera directly, \
-                       not for normal use). Set IRLUME_DEV=1 to enable it."
+                "[irlume] '{cmd}' is a developer/benchmark tool. Set IRLUME_DEV=1 to enable."
             );
             return std::process::ExitCode::from(2);
         }
@@ -3898,12 +3897,9 @@ fn doctor_run(
         irlume_camera::emitter_journal::PendingSummary::Pending(entries) => {
             dout!(
                 report,
-                "[doctor] IR emitter: {} camera control(s) left changed by an interrupted \
-                 setup ⚠ — {}. Reconnect the camera and authenticate, or run \
-                 `sudo irlume ir-setup`, to put them back. If irlume has reported that \
-                 its attempts ran out, shut the machine down fully and boot again: a \
-                 reboot does not cut the camera's power, and a full power-off is what \
-                 clears a stuck control on the hardware measured so far",
+                "[doctor] IR emitter: {} camera control(s) modified by interrupted setup ⚠ — {}. \
+                 Run `sudo irlume ir-setup` or complete an authentication to restore them. \
+                 If controls remain stuck, perform a full power cycle.",
                 entries.len(),
                 entries.join("; ")
             );
@@ -3924,23 +3920,11 @@ fn doctor_run(
             report.check("emitter-stream-pending", State::Pass);
         }
         irlume_camera::emitter_journal::PendingSummary::Pending(entries) => {
-            // The advice splits by record state, because the recovery paths
-            // differ in kind (Codex round on #429): an APPLIED record is
-            // claimed and restored by a later authentication, while a
-            // PREPARED or unparseable one is never claimed (irlume cannot
-            // prove its write reached the camera) and only an administrator
-            // removing the named file resolves it.
             dout!(
                 report,
-                "[doctor] IR emitter: {} stream control record(s) still pending ⚠ — {}. \
-                 A record marked 'applied' is put back by authenticating while the \
-                 control still holds irlume's value; if its restore attempts ran out, \
-                 shut the machine down fully (not a reboot) or unplug an external \
-                 camera first. A record marked 'write may not have reached the camera' \
-                 is never restored automatically, but stops blocking on its own once \
-                 the control no longer holds its bytes: shut down fully, then \
-                 authenticate once. A record that will not parse is the one case that \
-                 needs an administrator to remove the named file",
+                "[doctor] IR emitter: {} stream control record(s) pending ⚠ — {}. \
+                 Authenticate to restore applied controls, or power cycle the machine/camera \
+                 if controls remain stuck.",
                 entries.len(),
                 entries.join("; ")
             );
@@ -4115,9 +4099,7 @@ fn doctor_run(
                 report.check_detail("onnxruntime", State::Fail, format!("{source}: {why}"));
                 dout!(
                     report,
-                    "[doctor] ONNX Runtime: {source} UNUSABLE ✗ ({why}). The daemon \
-                     cannot load models from this; if a packaged path above is a \
-                     leftover from a previous install, remove it"
+                    "[doctor] ONNX Runtime: {source} unusable ✗ ({why})"
                 );
             }
         }
@@ -4155,20 +4137,15 @@ fn doctor_run(
                 report.check_detail("tflite-runtime", State::Fail, e.to_string());
                 dout!(
                     report,
-                    "[doctor] TFLite runtime: UNUSABLE ✗ ({e}); fix or unset \
-                     IRLUME_TFLITE_LIB (the resolver refuses to fall through a \
-                     broken override)"
+                    "[doctor] TFLite runtime: unusable ✗ ({e}); verify or unset IRLUME_TFLITE_LIB"
                 );
             }
             Err(e @ TfliteUnavailable::NotFound { .. }) => {
                 report.check_detail("tflite-runtime", State::Warn, e.to_string());
                 dout!(
                     report,
-                    "[doctor] TFLite runtime: not loadable from this shell ⚠ ({e}). \
-                     The mesh is a .tflite, so a daemon without it does not start; \
-                     install the irlume package's runtime \
-                     (/usr/share/irlume/tflite/libtensorflowlite_c.so) or set \
-                     IRLUME_TFLITE_LIB in the irlumed unit"
+                    "[doctor] TFLite runtime: not loadable ⚠ ({e}); \
+                     ensure libtensorflowlite_c.so is installed or set IRLUME_TFLITE_LIB"
                 );
             }
         }

@@ -41,7 +41,7 @@ pub fn update(args: &[String]) -> ExitCode {
     let bin = env!("CARGO_PKG_VERSION");
     if version_base(&current) != bin {
         println!(
-            "[update] note: the running binary is {bin}, not the packaged {current}; the package version above is what updating replaces (see `irlume doctor`)"
+            "[update] note: running binary is {bin}, packaged version is {current}"
         );
     }
 
@@ -50,15 +50,15 @@ pub fn update(args: &[String]) -> ExitCode {
     let newer = match latest {
         Some(tag) => {
             if version_gt(tag.trim_start_matches('v'), &current) {
-                println!("[update] available: {tag}  →  a newer release is out.");
+                println!("[update] available: {tag} (newer release available)");
                 true
             } else {
-                println!("[update] up to date (latest release is {tag}).");
+                println!("[update] up to date (version {tag})");
                 false
             }
         }
         None => {
-            println!("[update] couldn't reach the release feed (offline?). Not updating; the channel for this install:");
+            println!("[update] unable to reach release feed. Update channel for this installation:");
             false
         }
     };
@@ -246,8 +246,7 @@ fn is_copr_repo(repo: &str) -> bool {
 fn recommend_channel(origin: &InstallOrigin) {
     match origin {
         InstallOrigin::LocalRpm(_) => {
-            println!("  Recommended: Fedora's release channel is the Copr; switch once and");
-            println!("  future updates arrive with plain `dnf upgrade`:");
+            println!("  Recommended: enable the Copr repository for updates via dnf:");
             println!("    sudo dnf copr enable archledger/irlume");
             println!("    sudo dnf install irlume");
         }
@@ -258,17 +257,15 @@ fn recommend_channel(origin: &InstallOrigin) {
             };
             match ppa_serves(&codename) {
                 Some(true) => {
-                    println!("  Recommended: Ubuntu's release channel is the PPA; switch once and");
-                    println!("  future updates arrive with plain `apt upgrade`:");
+                    println!("  Recommended: enable the PPA repository for updates via apt:");
                     println!("    sudo add-apt-repository ppa:archledger/irlume");
                     println!("    sudo apt install irlume");
                 }
                 Some(false) => {
-                    println!("  The PPA carries only the current Ubuntu LTS; for `{codename}` the release");
-                    println!("  .deb IS your update channel; re-run `irlume update` when a new one is out.");
+                    println!("  The PPA carries only the current Ubuntu LTS; for `{codename}` update via release .deb.");
                 }
                 None => {
-                    println!("  If the PPA serves your Ubuntu series, switching makes future updates automatic:");
+                    println!("  If the PPA serves this Ubuntu series, enable it for automatic updates:");
                     println!("    sudo add-apt-repository ppa:archledger/irlume && sudo apt install irlume");
                 }
             }
@@ -1881,93 +1878,65 @@ pub fn help() -> ExitCode {
         "\
 irlume - local face authentication
 
-USAGE: irlume <command> [options]   (default user = $USER; override with --user U)
+USAGE: irlume <command> [options]   (default user: $USER; override with --user <username>)
 
 SETUP & STATUS
-  tui                   guided setup + live dashboard (enroll & configure here)
-  setup                 scripted onboarding (enroll, keyring, recovery, wiring)
-  status                health dashboard (daemon, enrollment, keyring, cameras)
-  detect                script probe; exit 0=ready / 10=partial / 20=absent
-  doctor                platform / TPM / Secure Boot / camera / model checks
+  tui                   guided setup and interactive dashboard
+  setup                 initial configuration (enrollment, keyring, recovery, wiring)
+  status                system status dashboard (daemon, enrollment, keyring, cameras)
+  detect                automation probe (exit codes: 0 ready, 10 partial, 20 absent)
+  doctor                system diagnostics (platform, TPM, Secure Boot, cameras, models)
   support-report [--output FILE.txt] [--since 10m] [--probe]
   trace [record] [--duration 60s] [--output FILE.jsonl]
   trace explain FILE.jsonl [--output FILE.txt]
-                        create a private 0600 report; default is read-only and
-                        camera-free, while --probe is explicit and root-only
+                        generate diagnostic support reports
   deps                  verify runtime dependencies (onnxruntime, models, TPM)
 
 ENROLLMENT & AUTH
-  enroll [--name N] [--scans K] [--reset]   capture a face profile
-  profiles [list|add-scan|rename|delete|forget-model|eyes-open off]   manage profiles
-                        (one-release migration only: clears the retired gate;
-                        it cannot be turned on, see issue #386)
-  identify              1:N \"who is this?\" (all users as root; else scoped to you)
+  enroll [--name N] [--scans K] [--reset]   enroll a face profile
+  profiles [list|add-scan|rename|delete|forget-model|eyes-open off]   manage face profiles
+  identify              1:N identification across enrolled users
+
 KEYRING / TPM
-  keyring <arm|status|forget>     TPM-sealed secret so a login opens your wallet
-                        (forget takes --force to erase without re-keying back)
-  reseal                re-bind the sealed secret to current PCRs (after a
-                        firmware/kernel update); safe, re-enters the password
-  recovery <status|setup|restore|forget>   recovery passphrase + encryption
-  retry <status|reset> [--user U]         inspect/reset face retry state
-                        reset verifies your local password; root is an admin override
-  diag                  TPM seal + PCR-drift diagnostics (run with sudo for detail)
+  keyring <arm|status|forget>     TPM-sealed credential for automatic keyring unlock
+  reseal                re-bind sealed credentials to current PCR measurements
+  recovery <status|setup|restore|forget>   recovery passphrase configuration
+  retry <status|reset> [--user U]         inspect or reset face retry state
+  diag                  TPM seal and PCR drift diagnostics
 
 SYSTEM INTEGRATION
   login <status|enable|disable|reconcile> [--with-sudo] [--with-polkit] [--apply]
-                        PAM wiring: greeters, lock screen, sudo, and app prompts
-                        (--with-polkit lets your face approve Bitwarden/pkexec);
-                        reconcile re-applies it after a distro PAM regeneration and
-                        applies immediately (no --apply; the self-heal unit runs it)
-  logs [-f] [--since T]           the face-auth journal in one view (daemon, PAM, keyring)
-  logs debug <on|off>             per-stage pipeline tracing in the daemon (sudo)
+                        PAM integration for display managers, lock screen, and sudo
+  logs [-f] [--since T]           face authentication system journal
+  logs debug <on|off>             pipeline debug tracing
   fingerprint <status|add|verify|reset|enable|disable> [--fingerprint-only]
-                        fprintd companion; enable = face OR fingerprint (both),
-                        --fingerprint-only replaces face with fingerprint
+                        fprintd integration (dual face/fingerprint or fingerprint-only)
   bitwarden <status|setup> [--apply]
-                        install Bitwarden's biometric-unlock polkit action
-                        (flatpak/native; snap is handled by snapd already)
-  selinux <status|load>           SELinux module for the login greeter
-  ir-setup [--dry-run]            configure the IR emitter (sudo; rarely needed,
-                        and only ever run when you ask; it writes to the
-                        camera, so --dry-run first)
-  set-cameras <rgb> <ir>          persist the RGB+IR camera pair (sudo; the TUI
-                        camera picker runs this for you)
-  camera-tune [--rounds N]        measure whether this camera can stream RGB and
-                        IR at once without dimming, and store the answer (sudo)
-  camera-mode                     report the capture mode in force for the
-                        auto-selected pair, and where that verdict came from
-  camera census [--json]          classify every camera-like device on the
-                        machine, printing the evidence each classification
-                        keyed on (#575; the hardware-report attachment)
-  models list --json           machine model listing; all other models
-                        subcommands are removed (ADR-0015) and answer with a notice
-  auth consent [status]         show privileged face-confirmation policy
-  auth sensor status            show the saved/daemon-observed face sensor policy
-  auth sensor preflight [--user U]  camera-free experimental IR prerequisites
-  auth sensor dual              restore dual sensors (sudo; no PAM changes)
-  auth sensor ir-only --yes      select EXPERIMENTAL IR-only (sudo; not qualified)
-  auth consent required         require confirmation (default; sudo)
-  auth consent hands-free --yes skip the keyword at privileged prompts (sudo;
-                        machine-wide opt-in). Login/lock behavior is separate.
-  biopolicy <on|off|status>       opt-in operation-class gate: restrict which
-                        services a face may satisfy (advanced; password unaffected)
-  update [--check]                update via the channel this was installed from
-                        (Copr/PPA: runs it; .deb/pkg/source: shows the steps)
-  uninstall [--keep-data] [--yes] un-wire PAM, stop the daemon, wipe enrolled
-                        data, then show the package-removal command (sudo)
-  version                         print the installed irlume version
+                        configure Bitwarden biometric unlock policy
+  selinux <status|load>           SELinux policy module management
+  ir-setup [--dry-run]            configure IR emitter hardware (requires root)
+  set-cameras <rgb> <ir>          persist RGB and IR camera device paths (requires root)
+  camera-tune [--rounds N]        test dual-stream RGB and IR camera performance (requires root)
+  camera-mode                     display active capture mode
+  camera census [--json]          enumerate and classify video devices
+  models list --json              display installed model information
+  auth consent [status]           display face confirmation policy
+  auth sensor status              display active face sensor policy
+  auth sensor preflight [--user U]  verify sensor requirements
+  auth sensor dual                configure dual sensors (requires root)
+  auth sensor ir-only --yes       select experimental IR-only mode (requires root)
+  auth consent required           require explicit confirmation (requires root)
+  auth consent hands-free --yes   enable hands-free confirmation (requires root)
+  biopolicy <on|off|status>       service-level biometric access restrictions
+  update [--check]                update irlume via system package manager
+  uninstall [--keep-data] [--yes] remove PAM integration, daemon, and data (requires root)
+  version                         display installed irlume version
 
-MACHINE-READABLE OUTPUT (for desktop integrations; see docs/INTEGRATION.md)
-  --json                on version, status, doctor, support-report, profiles list, models list,
-                        camera census, camera diagnostics, login status, login plan/apply/
-                        verify/rollback, auth test --events=jsonl:
-                        one line of JSON on stdout, stable check ids and error
-                        codes, nothing else printed
-  --contract N          declare the contract version you implement; omitted
-                        always means 1, and an unimplemented one is refused
-                        before anything runs
+MACHINE-READABLE OUTPUT
+  --json                output single-line JSON on supported commands
+  --contract N          specify contract version (default: 1)
 
-  (developer/benchmark tools are hidden; set IRLUME_DEV=1 to enable them)
+  (developer and benchmark tools are hidden; set IRLUME_DEV=1 to enable them)
 "
     );
     ExitCode::SUCCESS

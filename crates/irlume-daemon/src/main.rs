@@ -263,6 +263,39 @@ fn pad_ir_enabled() -> bool {
     )
 }
 
+/// Idle duration before unloading models from memory.
+/// Configured via `IRLUME_IDLE_UNLOAD_SECS` or `idle_unload_secs` in settings.conf.
+/// Defaults to 300 seconds (5 minutes). Set to 0, "off", or "none" to disable idle unloading.
+fn idle_unload_duration() -> Option<std::time::Duration> {
+    let raw = std::env::var("IRLUME_IDLE_UNLOAD_SECS")
+        .ok()
+        .or_else(|| irlume_common::config::read_kv("settings.conf", "idle_unload_secs"));
+
+    let Some(raw) = raw.as_deref().map(str::trim) else {
+        return Some(std::time::Duration::from_secs(300));
+    };
+    if raw.is_empty() {
+        return Some(std::time::Duration::from_secs(300));
+    }
+    if irlume_common::config::falsy(raw)
+        || raw.eq_ignore_ascii_case("none")
+        || raw.eq_ignore_ascii_case("disabled")
+    {
+        return None;
+    }
+    match raw.parse::<u64>() {
+        Ok(0) => None,
+        Ok(secs) => Some(std::time::Duration::from_secs(secs)),
+        Err(_) => {
+            jout_warn!(
+                "irlumed: invalid idle_unload_secs {raw:?}; using default of 300s"
+            );
+            Some(std::time::Duration::from_secs(300))
+        }
+    }
+}
+
+
 fn pad_model_status(
     enabled: bool,
     present: bool,
@@ -834,14 +867,12 @@ fn main() {
                     // operator reading the journal knows what each one does
                     // and does not stop.
                     jout_info!(
-                        "irlumed: RGB PAD cue (ViT) {} — catches print/banner species; \
-                         does NOT stop a phone at login distance; password-only switch: IRLUME_PAD_VIT=0",
-                        if e.has_vit_pad() { "loaded" } else { "UNAVAILABLE (face authentication is password-only)" }
+                        "irlumed: RGB PAD cue (ViT) {} (switch: IRLUME_PAD_VIT=0)",
+                        if e.has_vit_pad() { "loaded" } else { "unavailable (password fallback)" }
                     );
                     jout_info!(
-                        "irlumed: IR PAD cue (flir) {} — screens/phones present no face \
-                         in IR; print species; password-only switch: IRLUME_PAD_IR=0",
-                        if e.has_pad_ir() { "loaded" } else { "UNAVAILABLE (secure and dark face authentication are password-only)" }
+                        "irlumed: IR PAD cue (flir) {} (switch: IRLUME_PAD_IR=0)",
+                        if e.has_pad_ir() { "loaded" } else { "unavailable (password fallback)" }
                     );
                     (e, rgb_pad_status, ir_pad_status)
                 }
@@ -852,6 +883,10 @@ fn main() {
             };
             let (engine, rgb_pad_status, ir_pad_status) = engine;
             publish_engine_bits(&engine, rgb_pad_status, ir_pad_status);
+            #[cfg(target_os = "linux")]
+            unsafe {
+                libc::malloc_trim(0);
+            }
 
             // Read-only compatibility notices. Historical untagged IR may be
             // raw or adapted; the live pipeline cannot safely retag it. Keep
@@ -933,9 +968,9 @@ fn main() {
             // deadlines, each connection is isolated behind catch_unwind, and camera
             // work carries a per-uid throttle. On Fedora the SELinux module remains the
             // mandatory-access layer.
-            jout_info!("irlumed: serving on {socket} (0666; SO_PEERCRED authorizes every request)");
+            jout_info!("irlumed: listening on {socket}");
             if irlume_common::dbglog::on() {
-                jout_info!("irlumed: diagnostic tracing ON (IRLUME_LOG=debug): per-stage pipeline lines follow; numbers only, never frames/embeddings");
+                jout_info!("irlumed: debug tracing enabled (IRLUME_LOG=debug)");
             }
 
             // Socket watchdog: if our socket file is deleted/replaced out from under us
@@ -962,6 +997,7 @@ fn main() {
             let _worker = {
                 let arbiter = std::sync::Arc::clone(&arbiter);
                 let diagnostic_state = std::sync::Arc::clone(&diagnostic_state);
+                let idle_timeout = idle_unload_duration();
                 std::thread::Builder::new()
                     .name("irlume-camera".into())
                     .spawn(move || {
@@ -972,8 +1008,30 @@ fn main() {
                         // the same signal so both agree on what "still working" means.
                         // Attaching it is part of becoming the worker's engine, not a
                         // startup step: see WorkerEngine (#359).
-                        let mut engine = WorkerEngine::attach(engine, &arbiter);
-                        while let Some(job) = arbiter.take() {
+                        let mut engine: Option<WorkerEngine> = Some(WorkerEngine::attach(engine, &arbiter));
+                        loop {
+                            let job_opt = match idle_timeout {
+                                Some(timeout) => match arbiter.take_timeout(timeout) {
+                                    Ok(opt) => opt,
+                                    Err(()) => {
+                                        if engine.is_some() {
+                                            jout_info!(
+                                                "irlumed: idle timeout reached; releasing model sessions to reclaim memory"
+                                            );
+                                            engine = None;
+                                            #[cfg(target_os = "linux")]
+                                            unsafe {
+                                                libc::malloc_trim(0);
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                },
+                                None => arbiter.take(),
+                            };
+                            let Some(job) = job_opt else {
+                                break;
+                            };
                             note_worker_progress();
                             let Queued {
                                 authorization,
@@ -1004,6 +1062,44 @@ fn main() {
                                 note_worker_idle();
                                 continue;
                             }
+                            // Reload models on demand if they were released during idle.
+                            if engine.is_none() {
+                                diagnostic_state.live().set_stage(irlume_common::live::LiveStage::Rebuilding);
+                                jout_info!("irlumed: reloading models on demand");
+                                note_worker_progress();
+                                let reloaded = (build_engine)(None);
+                                match reloaded {
+                                    Ok((fresh, rgb_pad_status, ir_pad_status)) => {
+                                        let attached = WorkerEngine::attach(fresh, &arbiter);
+                                        publish_engine_bits(
+                                            &attached,
+                                            rgb_pad_status,
+                                            ir_pad_status,
+                                        );
+                                        #[cfg(target_os = "linux")]
+                                        unsafe {
+                                            libc::malloc_trim(0);
+                                        }
+                                        engine = Some(attached);
+                                        diagnostic_state.live().set_stage(irlume_common::live::LiveStage::Ready);
+                                        jout_info!("irlumed: models reloaded on demand");
+                                    }
+                                    Err(e) => {
+                                        diagnostic_state.live().set_stage(irlume_common::live::LiveStage::Ready);
+                                        jout_err!(
+                                            "irlumed: failed to reload models on demand ({e}); rejecting request"
+                                        );
+                                        link.finish_activity();
+                                        scope.finish(
+                                            irlume_common::diagnostics::CategoricalOutcome::Refused,
+                                        );
+                                        arbiter.finish(job.class, job.uid);
+                                        let _ = reply.send(Response::Error("models unavailable".into()).into());
+                                        note_worker_idle();
+                                        continue;
+                                    }
+                                }
+                            }
                             // Isolate each request behind catch_unwind. A panic deep in
                             // frame decode or inference (e.g. a V4L2 driver echoing back
                             // a 0-dimension or short-buffered frame) must deny THIS one
@@ -1011,7 +1107,15 @@ fn main() {
                             // unwind out of the worker and take down all face auth for
                             // every user.
                             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                dispatch_scoped_session(req, &peer, &mut engine, &scope, authorization, session.as_ref(), position.as_ref())
+                                dispatch_scoped_session(
+                                    req,
+                                    &peer,
+                                    engine.as_mut().expect("worker engine loaded"),
+                                    &scope,
+                                    authorization,
+                                    session.as_ref(),
+                                    position.as_ref(),
+                                )
                             }));
                             // Release the slot before anything else can fail, so a
                             // panicking request cannot lock its uid out of the camera
@@ -1025,9 +1129,8 @@ fn main() {
                                 Err(_) => {
                                     diagnostic_state.live().set_stage(irlume_common::live::LiveStage::Rebuilding);
                                     jout_err!(
-                                        "irlumed: request handler PANICKED; this request was denied \
-                                         (PAM falls back to the password). Rebuilding the engine for a \
-                                         clean state; please report this with the backtrace above."
+                                        "irlumed: request handler panicked; request denied. \
+                                         Rebuilding engine for clean state."
                                     );
                                     // AssertUnwindSafe only silences the compiler, it
                                     // does not prove the ONNX sessions are in a
@@ -1058,12 +1161,17 @@ fn main() {
                                             // Back through `attach`, because a bare
                                             // Engine has no stop signal and assigning
                                             // one here is exactly what #359 was.
-                                            engine = WorkerEngine::attach(fresh, &arbiter);
+                                            let attached = WorkerEngine::attach(fresh, &arbiter);
                                             publish_engine_bits(
-                                                &engine,
+                                                &attached,
                                                 rgb_pad_status,
                                                 ir_pad_status,
                                             );
+                                            #[cfg(target_os = "linux")]
+                                            unsafe {
+                                                libc::malloc_trim(0);
+                                            }
+                                            engine = Some(attached);
                                             jout_notice!("irlumed: engine rebuilt after panic");
                                         }
                                         Err(e) => jout_err!(
@@ -7286,6 +7394,60 @@ mod tests {
             pad_model_status(true, true, true, false),
             PadModelStatus::Loaded
         );
+    }
+
+    #[test]
+    fn idle_unload_duration_config_parsing() {
+        let _g = env_lock();
+        let dir = std::env::temp_dir().join(format!("irlume-idle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("IRLUME_CONFIG_DIR", &dir);
+        std::env::remove_var("IRLUME_IDLE_UNLOAD_SECS");
+
+        // Default: 300 seconds
+        assert_eq!(
+            idle_unload_duration(),
+            Some(std::time::Duration::from_secs(300))
+        );
+
+        // From settings.conf
+        std::fs::write(dir.join("settings.conf"), "idle_unload_secs=120\n").unwrap();
+        assert_eq!(
+            idle_unload_duration(),
+            Some(std::time::Duration::from_secs(120))
+        );
+
+        // Disabled via 0 in settings.conf
+        std::fs::write(dir.join("settings.conf"), "idle_unload_secs=0\n").unwrap();
+        assert_eq!(idle_unload_duration(), None);
+
+        // Disabled via "off" in settings.conf
+        std::fs::write(dir.join("settings.conf"), "idle_unload_secs=off\n").unwrap();
+        assert_eq!(idle_unload_duration(), None);
+
+        // Disabled via "none" in settings.conf
+        std::fs::write(dir.join("settings.conf"), "idle_unload_secs=none\n").unwrap();
+        assert_eq!(idle_unload_duration(), None);
+
+        // Env var overrides settings.conf
+        std::env::set_var("IRLUME_IDLE_UNLOAD_SECS", "45");
+        assert_eq!(
+            idle_unload_duration(),
+            Some(std::time::Duration::from_secs(45))
+        );
+
+        // Env var 0 disables
+        std::env::set_var("IRLUME_IDLE_UNLOAD_SECS", "0");
+        assert_eq!(idle_unload_duration(), None);
+
+        // Env var off disables
+        std::env::set_var("IRLUME_IDLE_UNLOAD_SECS", "off");
+        assert_eq!(idle_unload_duration(), None);
+
+        std::env::remove_var("IRLUME_IDLE_UNLOAD_SECS");
+        std::env::remove_var("IRLUME_CONFIG_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

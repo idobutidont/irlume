@@ -70,7 +70,7 @@ pub fn run(args: &[String]) -> ExitCode {
     let keep_data = args.iter().any(|a| a == "--keep-data");
 
     if !is_root() {
-        eprintln!("[uninstall] needs root: sudo irlume uninstall");
+        eprintln!("[uninstall] error: root privileges required (sudo irlume uninstall)");
         return ExitCode::FAILURE;
     }
 
@@ -92,10 +92,8 @@ pub fn run(args: &[String]) -> ExitCode {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
-                "[uninstall] refusing: could not read the sealed-envelope store ({e}). \
-                 One of these may hold a GNOME keyring token, and deleting it would \
-                 leave that keyring encrypted under a secret nothing can reproduce. \
-                 Fix the store (or move it aside deliberately) and re-run."
+                "[uninstall] error: cannot read sealed-envelope store ({e}). \
+                 Aborting to prevent potential loss of encrypted keyring tokens."
             );
             return ExitCode::FAILURE;
         }
@@ -107,14 +105,12 @@ pub fn run(args: &[String]) -> ExitCode {
         .collect();
     if !token_users.is_empty() {
         eprintln!(
-            "[uninstall] refusing: the login keyring of {} is keyed to an irlume-held \
-             token, and uninstalling now would lock it permanently.",
+            "[uninstall] error: user login keyring(s) for [{}] are keyed to irlume tokens.",
             token_users.join(", ")
         );
         eprintln!(
-            "[uninstall] Have each of these users run `irlume keyring forget` in their \
-             own session first (it re-keys the keyring back to their password), then \
-             re-run the uninstall."
+            "[uninstall] Affected users must run `irlume keyring forget` in their \
+             session to restore password-based encryption before uninstalling."
         );
         return ExitCode::FAILURE;
     }

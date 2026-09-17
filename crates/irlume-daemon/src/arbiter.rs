@@ -402,6 +402,36 @@ impl<T> Arbiter<T> {
         }
     }
 
+    /// Block until there is work or `timeout` expires, and take the most urgent job.
+    ///
+    /// Returns `Ok(Some(job))` on work, `Ok(None)` when the arbiter is closed and drained,
+    /// or `Err(())` on timeout while still open and empty.
+    pub fn take_timeout(&self, timeout: std::time::Duration) -> Result<Option<Job<T>>, ()> {
+        let mut inner = self.lock();
+        loop {
+            if let Some(job) = inner.auth.pop_front() {
+                inner.auth_running = true;
+                self.cancel.reset();
+                return Ok(Some(job));
+            }
+            if let Some(job) = inner.other.pop_front() {
+                self.cancel.reset();
+                return Ok(Some(job));
+            }
+            if inner.closed {
+                return Ok(None);
+            }
+            let (new_inner, wait_res) = self
+                .ready
+                .wait_timeout(inner, timeout)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            inner = new_inner;
+            if wait_res.timed_out() && inner.auth.is_empty() && inner.other.is_empty() {
+                return Err(());
+            }
+        }
+    }
+
     /// Release what a finished job held. Always call this, including when the
     /// job panicked: a slot that is never released is a uid locked out of the
     /// camera until the daemon restarts.
@@ -670,5 +700,22 @@ mod tests {
             }),
             Class::Plain
         );
+    }
+
+    #[test]
+    fn take_timeout_times_out_when_empty_and_takes_when_ready() {
+        let a = arb();
+        let timeout = std::time::Duration::from_millis(15);
+        assert_eq!(a.take_timeout(timeout), Err(()));
+
+        a.submit(Class::Auth, 0, "login").unwrap();
+        let job = a.take_timeout(timeout).unwrap().unwrap();
+        assert_eq!(job.payload, "login");
+        a.finish(job.class, job.uid);
+
+        assert_eq!(a.take_timeout(timeout), Err(()));
+
+        a.close();
+        assert_eq!(a.take_timeout(timeout), Ok(None));
     }
 }

@@ -543,11 +543,14 @@ mod onnx {
         }
         // Each resident model has its own pool. Let idle workers block while
         // another model runs, retaining two threads for each active inference.
+        // Share environment allocators across sessions to reduce redundant memory pools.
         b.with_intra_threads(ORT_INTRA_THREADS)
             .map_err(err)?
             .with_intra_op_spinning(false)
             .map_err(err)?
             .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(err)?
+            .with_env_allocators()
             .map_err(err)?
             .commit_from_memory(model)
             .map_err(err)
