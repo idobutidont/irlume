@@ -264,6 +264,7 @@ impl CancelToken {
 }
 
 /// One queued unit of work: what to run, and who asked.
+#[derive(Debug, PartialEq, Eq)]
 pub struct Job<T> {
     pub class: Class,
     pub uid: u32,

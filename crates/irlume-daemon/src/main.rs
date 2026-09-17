@@ -1049,7 +1049,7 @@ fn main() {
                                         );
                                         link.finish_activity();
                                         scope.finish(
-                                            irlume_common::diagnostics::CategoricalOutcome::Refused,
+                                            irlume_common::diagnostics::CategoricalOutcome::Unavailable,
                                         );
                                         arbiter.finish(job.class, job.uid);
                                         let _ = reply.send(Response::Error("models unavailable".into()).into());

@@ -122,6 +122,7 @@ fn budget_hint_is_not_evaluated_for_excluded_requests() {
     assert_eq!(window.milliseconds, 5_000);
     ready.engine.ir_available = true;
 
+    let calls = Cell::new(0);
     let old_ir_pad = ready.engine.pad_ir.take();
     let window = ready.engine.authentication_window_from_with_hint(
         Instant::now(),
