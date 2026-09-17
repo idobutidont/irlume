@@ -2601,10 +2601,19 @@ mod tests {
             .unwrap();
         // unseal BEFORE substack; permit + reseal AFTER it.
         assert!(unseal < substack && substack < permit && permit < reseal_auth);
-        // session reseal present after the session substack.
-        assert!(lines
+        // session reseal present after the session substack and after the keyring daemon starter.
+        let reseal_session = lines
             .iter()
-            .any(|l| l.starts_with("session") && l.contains("reseal")));
+            .position(|l| l.starts_with("session") && l.contains("reseal"))
+            .unwrap();
+        let gkr_session = lines
+            .iter()
+            .position(|l| l.contains("pam_gnome_keyring.so") && l.contains("auto_start"))
+            .unwrap();
+        assert!(
+            reseal_session > gkr_session,
+            "session reseal must run after the line that starts the keyring daemon"
+        );
     }
 
     // Regression: the substack (Fedora) branch emitted a BARE `unseal` where the

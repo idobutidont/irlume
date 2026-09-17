@@ -135,6 +135,14 @@ pub(super) fn wire_greeter_impl(
     // greetd's pam_gnome_keyring run with the unsealed AUTHTOK → keyring unlocks).
     if let Some(inc_at) = lines.iter().position(|l| is_include_auth_layout(l)) {
         let mut out = Vec::with_capacity(lines.len() + 4);
+        let sess_inc_at = lines
+            .iter()
+            .position(|l| l.trim_start().starts_with("@include common-session"));
+        let sess_insert_at = lines
+            .iter()
+            .enumerate()
+            .rposition(|(i, l)| is_session_keyring_consumer(l) && sess_inc_at.map_or(true, |s| i >= s))
+            .or(sess_inc_at);
         for (i, l) in lines.iter().enumerate() {
             if i == inc_at {
                 if face {
@@ -148,7 +156,7 @@ pub(super) fn wire_greeter_impl(
                     out.push(KEYRING_UNSEAL.to_string());
                 }
                 out.push(RESEAL_AUTH.to_string());
-            } else if l.trim_start().starts_with("@include common-session") {
+            } else if Some(i) == sess_insert_at {
                 out.push((*l).to_string());
                 out.push(RESEAL_SESSION.to_string());
             } else {
@@ -165,6 +173,14 @@ pub(super) fn wire_greeter_impl(
     let Some(auth_at) = auth_at else {
         return (content.to_string(), false);
     };
+    // If there is a session keyring consumer (e.g. pam_gnome_keyring.so auto_start),
+    // RESEAL_SESSION must run AFTER it so the daemon is already running when
+    // our session unlock helper connects to the control socket.
+    let sess_insert_at = lines
+        .iter()
+        .enumerate()
+        .rposition(|(i, l)| is_session_keyring_consumer(l) && sess_at.map_or(true, |s| i >= s))
+        .or(sess_at);
     let mut out = Vec::with_capacity(lines.len() + 5);
     for (i, l) in lines.iter().enumerate() {
         if i == auth_at {
@@ -186,14 +202,14 @@ pub(super) fn wire_greeter_impl(
                 out.push(KEYRING_UNSEAL.to_string());
             }
             out.push(RESEAL_AUTH.to_string());
-        } else if Some(i) == sess_at {
+        } else if Some(i) == sess_insert_at {
             out.push((*l).to_string());
             out.push(RESEAL_SESSION.to_string());
         } else {
             out.push((*l).to_string());
         }
     }
-    if sess_at.is_none() {
+    if sess_insert_at.is_none() {
         out.push(RESEAL_SESSION.to_string()); // harmless optional session line
     }
     (format!("{}\n", out.join("\n")), true)

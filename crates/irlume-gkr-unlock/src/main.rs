@@ -157,84 +157,105 @@ fn connect_with_deadline(sock: &std::path::Path) -> Result<UnixStream, String> {
         *slot = *b as libc::c_char;
     }
 
-    // SAFETY: a fresh socket, wrapped in an owning UnixStream before any
-    // fallible step so it cannot leak.
-    let fd = unsafe {
-        libc::socket(
-            libc::AF_UNIX,
-            libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(format!("socket: {}", std::io::Error::last_os_error()));
-    }
-    #[expect(clippy::undocumented_unsafe_blocks, reason = "doc backlog")]
-    let stream = unsafe { UnixStream::from_raw_fd(fd) };
-
-    // SAFETY: addr is fully initialised above; the length is its real size.
-    let rc = unsafe {
-        libc::connect(
-            fd,
-            &addr as *const _ as *const libc::sockaddr,
-            std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
-        )
-    };
-    if rc != 0 {
-        let e = std::io::Error::last_os_error();
-        if e.raw_os_error() != Some(libc::EINPROGRESS) {
-            return Err(format!(
-                "connect {}: {e} (no gnome-keyring-daemon control socket; is \
-                 gnome-keyring installed and socket-activated?)",
-                sock.display()
-            ));
-        }
-        // In progress: wait for writability, bounded.
-        let mut pfd = libc::pollfd {
-            fd,
-            events: libc::POLLOUT,
-            revents: 0,
-        };
-        // SAFETY: one descriptor this scope owns.
-        let n = unsafe { libc::poll(&mut pfd, 1, IO_TIMEOUT.as_millis() as libc::c_int) };
-        if n == 0 {
-            return Err(format!(
-                "connect {} timed out after {:?}",
-                sock.display(),
-                IO_TIMEOUT
-            ));
-        }
-        if n < 0 {
-            return Err(format!("poll: {}", std::io::Error::last_os_error()));
-        }
-        // Poll reports readiness, not success; the error is in SO_ERROR.
-        let mut err: libc::c_int = 0;
-        let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
-        // SAFETY: reading a fixed-size option into a matching local.
-        let rc = unsafe {
-            libc::getsockopt(
-                fd,
-                libc::SOL_SOCKET,
-                libc::SO_ERROR,
-                &mut err as *mut _ as *mut libc::c_void,
-                &mut len,
+    let deadline = std::time::Instant::now() + IO_TIMEOUT;
+    loop {
+        // SAFETY: a fresh socket, wrapped in an owning UnixStream before any
+        // fallible step so it cannot leak.
+        let fd = unsafe {
+            libc::socket(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK,
+                0,
             )
         };
-        // Read errno immediately: anything below could clobber it.
-        let probe_errno = std::io::Error::last_os_error()
-            .raw_os_error()
-            .unwrap_or(libc::EIO);
-        if let Some(why) = pending_connect_failure(rc, err, probe_errno) {
-            return Err(format!("connect {}: {why}", sock.display()));
+        if fd < 0 {
+            return Err(format!("socket: {}", std::io::Error::last_os_error()));
         }
-    }
+        #[expect(clippy::undocumented_unsafe_blocks, reason = "doc backlog")]
+        let stream = unsafe { UnixStream::from_raw_fd(fd) };
 
-    // Back to blocking, now that the read and write deadlines below apply.
-    stream
-        .set_nonblocking(false)
-        .map_err(|e| format!("clearing non-blocking: {e}"))?;
-    let _ = stream.as_raw_fd();
-    Ok(stream)
+        // SAFETY: addr is fully initialised above; the length is its real size.
+        let rc = unsafe {
+            libc::connect(
+                fd,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
+            )
+        };
+        if rc != 0 {
+            let e = std::io::Error::last_os_error();
+            let raw = e.raw_os_error();
+            if raw == Some(libc::EINPROGRESS) {
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    return Err(format!(
+                        "connect {} timed out after {:?}",
+                        sock.display(),
+                        IO_TIMEOUT
+                    ));
+                }
+                let remain = deadline - now;
+                let mut pfd = libc::pollfd {
+                    fd,
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                let poll_timeout = remain.as_millis().min(i32::MAX as u128) as libc::c_int;
+                let n = unsafe { libc::poll(&mut pfd, 1, poll_timeout) };
+                if n == 0 {
+                    return Err(format!(
+                        "connect {} timed out after {:?}",
+                        sock.display(),
+                        IO_TIMEOUT
+                    ));
+                }
+                if n < 0 {
+                    return Err(format!("poll: {}", std::io::Error::last_os_error()));
+                }
+                let mut err: libc::c_int = 0;
+                let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+                let opt_rc = unsafe {
+                    libc::getsockopt(
+                        fd,
+                        libc::SOL_SOCKET,
+                        libc::SO_ERROR,
+                        &mut err as *mut _ as *mut libc::c_void,
+                        &mut len,
+                    )
+                };
+                let probe_errno = std::io::Error::last_os_error()
+                    .raw_os_error()
+                    .unwrap_or(libc::EIO);
+                if let Some(why) = pending_connect_failure(opt_rc, err, probe_errno) {
+                    if (err == libc::ECONNREFUSED || err == libc::ENOENT)
+                        && std::time::Instant::now() < deadline
+                    {
+                        std::thread::sleep(std::time::Duration::from_millis(25));
+                        continue;
+                    }
+                    return Err(format!("connect {}: {why}", sock.display()));
+                }
+            } else if (raw == Some(libc::ENOENT) || raw == Some(libc::ECONNREFUSED))
+                && std::time::Instant::now() < deadline
+            {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+                continue;
+            } else {
+                return Err(format!(
+                    "connect {}: {e} (no gnome-keyring-daemon control socket; is \
+                     gnome-keyring installed and socket-activated?)",
+                    sock.display()
+                ));
+            }
+        }
+
+        // Back to blocking, now that the read and write deadlines below apply.
+        stream
+            .set_nonblocking(false)
+            .map_err(|e| format!("clearing non-blocking: {e}"))?;
+        let _ = stream.as_raw_fd();
+        return Ok(stream);
+    }
 }
 
 /// Why a non-blocking connect that `poll` reported ready did not actually

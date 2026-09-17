@@ -70,6 +70,15 @@ pub(super) fn is_auth_directive(line: &str) -> bool {
     t.strip_prefix('-').unwrap_or(t).split_whitespace().next() == Some("auth")
 }
 
+/// True when a line is a `session` directive for a login-keyring module
+/// that starts or configures the daemon (e.g. `pam_gnome_keyring.so auto_start`).
+pub(super) fn is_session_keyring_consumer(line: &str) -> bool {
+    let d = directive(line);
+    let phase = d.strip_prefix('-').unwrap_or(d);
+    phase.split_whitespace().next() == Some("session")
+        && KEYRING_CONSUMERS.iter().any(|c| d.contains(c))
+}
+
 /// An `auth` line whose control keyword is `substack`, whatever the shared stack
 /// happens to be NAMED. A substack is atomic for jump counting, so this is a
 /// safe jump anchor even when we do not recognize the target.

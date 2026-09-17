@@ -628,7 +628,7 @@ fn hand_token_to_keyring_daemon(user: &str, token: &irlume_common::SecretBytes) 
         .arg(user)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .spawn()
     {
         Ok(c) => c,
