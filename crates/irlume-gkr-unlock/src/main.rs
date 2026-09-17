@@ -79,6 +79,15 @@ fn run(user: &str) -> Result<(), String> {
     }
 
     let pw = lookup_user(user)?;
+    let keyring = login_keyring_path(&pw)?;
+    let runtime_dir = runtime_dir_for(&pw)?;
+
+    // EVERYTHING below runs as the target user: the daemon compares the
+    // connecting peer's uid against its own, and root pathname work inside a
+    // user-owned directory is the CVE-2018-10380 shape this codebase refuses
+    // to repeat.
+    drop_privileges(&pw)?;
+
     // Refuse when there is no login keyring to unlock.
     //
     // UNLOCK is not read-only: `unlock_or_create_login()` CREATES the login
@@ -88,7 +97,6 @@ fn run(user: &str) -> Result<(), String> {
     // is a 64-character random token they have never seen and no GNOME
     // interface can tell them. Unlocking an existing keyring is this program's
     // whole job; creating one is not.
-    let keyring = login_keyring_path(&pw)?;
     if !keyring.exists() {
         return Err(format!(
             "{} does not exist; refusing to UNLOCK, which would CREATE a login keyring \
@@ -97,13 +105,6 @@ fn run(user: &str) -> Result<(), String> {
             keyring.display()
         ));
     }
-    let runtime_dir = runtime_dir_for(&pw)?;
-
-    // EVERYTHING below runs as the target user: the daemon compares the
-    // connecting peer's uid against its own, and root pathname work inside a
-    // user-owned directory is the CVE-2018-10380 shape this codebase refuses
-    // to repeat.
-    drop_privileges(&pw)?;
 
     let sock = gkr_wire::control_socket_path(&runtime_dir);
     let mut stream = connect_with_deadline(&sock)?;

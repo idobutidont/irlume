@@ -41,6 +41,12 @@ const M_COST: u32 = 19_456;
 const T_COST: u32 = 2;
 const P_COST: u32 = 1;
 const CURRENT_VERSION: u32 = 1;
+pub const MIN_M_COST: u32 = 8_192;
+pub const MAX_M_COST: u32 = 65_536;
+pub const MIN_T_COST: u32 = 1;
+pub const MAX_T_COST: u32 = 10;
+pub const MIN_P_COST: u32 = 1;
+pub const MAX_P_COST: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryEnvelope {
@@ -108,6 +114,14 @@ pub fn unwrap(passphrase: &[u8], env: &RecoveryEnvelope) -> Result<Zeroizing<Vec
             env.kdf
         )));
     }
+    if !(MIN_M_COST..=MAX_M_COST).contains(&env.m_cost)
+        || !(MIN_T_COST..=MAX_T_COST).contains(&env.t_cost)
+        || !(MIN_P_COST..=MAX_P_COST).contains(&env.p_cost)
+    {
+        return Err(Error::Policy(
+            "unsupported or excessive recovery argon2 parameters".into(),
+        ));
+    }
     let salt = STANDARD
         .decode(&env.salt)
         .map_err(|e| Error::Protocol(format!("bad recovery salt: {e}")))?;
@@ -169,5 +183,36 @@ mod tests {
                 Err(Error::Protocol(message)) if message.contains("unsupported recovery envelope version")
             ));
         }
+    }
+
+    #[test]
+    fn unwrap_rejects_excessive_or_unsupported_argon2_parameters() {
+        let mut env = RecoveryEnvelope {
+            version: CURRENT_VERSION,
+            kdf: "argon2id".into(),
+            salt: STANDARD.encode([0u8; SALT_LEN]),
+            m_cost: MAX_M_COST + 1,
+            t_cost: T_COST,
+            p_cost: P_COST,
+            wrapped: STANDARD.encode(vec![0u8; 32]),
+        };
+        assert!(matches!(
+            unwrap(b"passphrase", &env),
+            Err(Error::Policy(message)) if message.contains("unsupported or excessive recovery argon2 parameters")
+        ));
+
+        env.m_cost = M_COST;
+        env.t_cost = MAX_T_COST + 1;
+        assert!(matches!(
+            unwrap(b"passphrase", &env),
+            Err(Error::Policy(message)) if message.contains("unsupported or excessive recovery argon2 parameters")
+        ));
+
+        env.t_cost = T_COST;
+        env.p_cost = MAX_P_COST + 1;
+        assert!(matches!(
+            unwrap(b"passphrase", &env),
+            Err(Error::Policy(message)) if message.contains("unsupported or excessive recovery argon2 parameters")
+        ));
     }
 }

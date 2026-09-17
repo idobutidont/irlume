@@ -9,6 +9,7 @@
 
 use crate::{crypto, template_key};
 use base64::{engine::general_purpose::STANDARD, Engine};
+use irlume_common::jout_warn;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -631,6 +632,9 @@ fn save_key(user: &str) -> irlume_common::Result<Option<Zeroizing<Vec<u8>>>> {
     if template_key::tpm_available() {
         Ok(Some(template_key::ensure_key_unlocked(user)?))
     } else {
+        jout_warn!(
+            "irlumed: WARNING: /dev/tpmrm0 unavailable; saving face enrollment for '{user}' as unencrypted plaintext"
+        );
         Ok(None)
     }
 }

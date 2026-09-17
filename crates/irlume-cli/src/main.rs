@@ -1221,6 +1221,12 @@ fn rekey_login_keyring(current: &[u8], new: &[u8]) -> Result<(), String> {
             sock.display()
         )
     })?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .map_err(|e| format!("setting control socket read timeout: {e}"))?;
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(10)))
+        .map_err(|e| format!("setting control socket write timeout: {e}"))?;
     match gkr_wire::call(&mut stream, Op::Change, &[current, new])? {
         ControlResult::Ok => Ok(()),
         other => Err(format!("keyring re-key: {}", other.describe())),

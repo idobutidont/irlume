@@ -3619,7 +3619,13 @@ fn posture(req: &Request) -> RequestPosture<'_> {
         // Framing guide: the optional user only tunes the pitch band, but it is
         // still interpolated into a state path, so it is screened like the rest.
         PositionSample { user } | PositionSession { user } => RequestPosture {
-            privilege: AnyPeer,
+            privilege: if user.is_some() {
+                RootOrTarget {
+                    verb: "sample position for",
+                }
+            } else {
+                AnyPeer
+            },
             user: user.as_deref(),
             enrollment: Reads,
         },
@@ -5267,6 +5273,9 @@ fn dispatch_scoped_session_inner(
             }
         }
         Request::PositionSession { user } => {
+            if user.is_none() && peer.uid != 0 && identify_scope(peer) == IdentifyScope::NoAccount {
+                return Response::Error("caller has no local account".into());
+            }
             let Some(observer) = position else {
                 return Response::Error("framing requires its live connection".into());
             };
@@ -5282,6 +5291,9 @@ fn dispatch_scoped_session_inner(
             }
         }
         Request::PositionSample { user } => {
+            if user.is_none() && peer.uid != 0 && identify_scope(peer) == IdentifyScope::NoAccount {
+                return Response::Error("caller has no local account".into());
+            }
             match engine.position_sample(user.as_deref().filter(|u| authorized_for(peer, u))) {
                 Ok(r) => Response::Position(r),
                 Err(e) => Response::Error(e.to_string()),
@@ -8696,6 +8708,7 @@ mod tests {
         vec![
             // No user to screen, and no band to tune to an account.
             Request::PositionSample { user: None },
+            Request::PositionSession { user: None },
             Request::FaceSensorStatus { user: None },
             // The reading form, which any peer may send.
             Request::SetupIrEmitter { dry_run: true },
@@ -14537,8 +14550,8 @@ mod tests {
                 other => panic!("non-root selftest must Error, got {other:?}"),
             }
         }
-        // A non-root peer asking to tune for another user is silently scoped
-        // to the anonymous band; either way the capture needs the camera.
+        // A non-root peer asking to tune for another user is refused before
+        // touching the camera.
         match dispatch(
             Request::PositionSample {
                 user: Some("root".into()),
@@ -14546,8 +14559,11 @@ mod tests {
             &peer(NOBODY),
             &mut e,
         ) {
-            Response::Error(msg) => assert!(msg.contains("no camera found"), "{msg}"),
-            other => panic!("position sample without a camera must Error, got {other:?}"),
+            Response::Error(msg) => assert!(
+                msg.contains("not authorized") || msg.contains("no camera found"),
+                "{msg}"
+            ),
+            other => panic!("position sample without authorization must Error, got {other:?}"),
         }
     }
 
