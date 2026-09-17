@@ -250,14 +250,6 @@ fn pad_ir_enabled() -> bool {
     )
 }
 
-/// Whether the machine-wide sensor policy is set to IR-only mode.
-fn is_ir_only_policy() -> bool {
-    matches!(
-        irlume_common::config::observe_face_sensor_policy().resolve(),
-        Ok(irlume_common::config::FaceSensorPolicy::IrOnlyExperimental)
-    )
-}
-
 /// Idle duration before unloading models from memory.
 /// Configured via `IRLUME_IDLE_UNLOAD_SECS` or `idle_unload_secs` in settings.conf.
 /// Defaults to 300 seconds (5 minutes). Set to 0, "off", or "none" to disable idle unloading.
@@ -794,6 +786,7 @@ fn main() {
             let (engine, rgb_pad_status, ir_pad_status) = engine;
             publish_engine_bits(&engine, rgb_pad_status, ir_pad_status);
             #[cfg(target_os = "linux")]
+            // SAFETY: libc::malloc_trim releases free heap memory back to the OS and has no preconditions.
             unsafe {
                 libc::malloc_trim(0);
             }
@@ -930,6 +923,7 @@ fn main() {
                                             );
                                             engine = None;
                                             #[cfg(target_os = "linux")]
+                                            // SAFETY: libc::malloc_trim releases free heap memory back to the OS and has no preconditions.
                                             unsafe {
                                                 libc::malloc_trim(0);
                                             }
@@ -987,6 +981,7 @@ fn main() {
                                             ir_pad_status,
                                         );
                                         #[cfg(target_os = "linux")]
+                                        // SAFETY: libc::malloc_trim releases free heap memory back to the OS and has no preconditions.
                                         unsafe {
                                             libc::malloc_trim(0);
                                         }
@@ -1078,6 +1073,7 @@ fn main() {
                                                 ir_pad_status,
                                             );
                                             #[cfg(target_os = "linux")]
+                                            // SAFETY: libc::malloc_trim releases free heap memory back to the OS and has no preconditions.
                                             unsafe {
                                                 libc::malloc_trim(0);
                                             }
@@ -7512,7 +7508,7 @@ mod tests {
         let (engine, rgb_pad, ir_pad) = load_pad_models(engine, &damaged_pad.to_string_lossy());
         assert_eq!(rgb_pad, irlume_common::PadModelStatus::Disabled);
         assert_eq!(ir_pad, irlume_common::PadModelStatus::LoadFailed);
-        assert!(!engine.has_vit_pad() && !engine.has_pad_ir());
+        assert!(!engine.has_pad_ir());
 
         std::env::set_var("IRLUME_PAD_IR", "0");
         let (_, rgb_pad, ir_pad) = load_pad_models(engine, &config.pad_ir);
@@ -7521,36 +7517,6 @@ mod tests {
         std::env::remove_var("IRLUME_PAD_IR");
         std::env::remove_var("IRLUME_MODELS_STRICT");
         std::env::remove_var("IRLUME_FORCE_NO_IR");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ir_only_policy_skips_rgb_models() {
-        let _guard = env_lock();
-        let dir =
-            std::env::temp_dir().join(format!("irlume-ir-only-skip-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let settings = dir.join("settings.conf");
-        std::fs::write(&settings, "face_sensor_policy = ir-only-experimental\n").unwrap();
-        std::env::set_var("IRLUME_CONFIG_DIR", &dir);
-
-        assert!(is_ir_only_policy());
-
-        let base = irlume_auth::Engine::load(
-            &model_path("face_detection_yunet_2023mar.onnx"),
-            &model_path("glintr100.onnx"),
-        )
-        .expect("base engine");
-
-        let fake_flir = dir.join("fake_flir.onnx");
-        std::fs::write(&fake_flir, b"fake flir").unwrap();
-
-        let (engine, rgb_pad, _) = load_pad_models(base, &fake_flir.to_string_lossy());
-        assert_eq!(rgb_pad, irlume_common::PadModelStatus::Disabled);
-        assert!(!engine.has_vit_pad());
-
-        std::env::remove_var("IRLUME_CONFIG_DIR");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

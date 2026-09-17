@@ -4172,15 +4172,7 @@ impl Engine {
             .as_ref()
             .map(|f| rgb_luma_stats(&rgb.data, rgb.width, rgb.height, &f.bbox))
             .unwrap_or((0.0, 0.0));
-        // 2D-FFT moiré / pixel-grid cue (screen-replay deterrent).
-        let rgb_moire = rgb_top
-            .as_ref()
-            .map(|f| {
-                irlume_vision::moire::moire_score(&irlume_vision::moire::face_gray_n(
-                    &rgb.data, rgb.width, rgb.height, &f.bbox,
-                ))
-            })
-            .unwrap_or(0.0);
+        let rgb_moire = 0.0;
         let pose = rgb_top
             .as_ref()
             .map(|f| irlume_vision::head_pose(&f.landmarks));
@@ -4232,25 +4224,6 @@ impl Engine {
         let rgb_pad = match (verdict, rgb_top.as_ref()) {
             (Verdict::Live, Some(_)) => PadEvidence::Unavailable,
             _ => PadEvidence::NotApplicable,
-        };
-        self.check_request_active()?;
-        let (verdict, reason, deny_cause) = match rgb_pad {
-            PadEvidence::Score(p) => {
-                irlume_common::dlog!("pad-vit(rgb-only): p_spoof {p:.3}");
-                if self.vit_pad_votes_deny(p) {
-                    irlume_common::dlog!(
-                        "pad-vit: 5-frame median >= {VIT_PAD_THRESHOLD:.2}; downgrading Live to Spoof"
-                    );
-                    (
-                        Verdict::Spoof,
-                        "RGB PAD cue flags a spoof; use your password".into(),
-                        irlume_liveness::DenyCause::Other,
-                    )
-                } else {
-                    (verdict, reason, deny_cause)
-                }
-            }
-            _ => (verdict, reason, deny_cause),
         };
         self.check_request_active()?;
         let embedding = match &rgb_top {
@@ -5254,24 +5227,6 @@ impl Engine {
             _ => PadEvidence::NotApplicable,
         };
         self.check_request_active()?;
-        let (verdict, reason, deny_cause) = match rgb_pad {
-            PadEvidence::Score(p) => {
-                irlume_common::dlog!("pad-vit: p_spoof {p:.3}");
-                if self.vit_pad_votes_deny(p) {
-                    irlume_common::dlog!(
-                        "pad-vit: 5-frame median >= {VIT_PAD_THRESHOLD:.2}; downgrading Live to Spoof"
-                    );
-                    (
-                        Verdict::Spoof,
-                        "RGB PAD cue flags a spoof; use your password".into(),
-                        irlume_liveness::DenyCause::Other,
-                    )
-                } else {
-                    (verdict, reason, deny_cause)
-                }
-            }
-            _ => (verdict, reason, deny_cause),
-        };
         diagnostics.emit_trace(irlume_common::diagnostics::TraceEventKind::StageTiming {
             stage: irlume_common::diagnostics::TraceStage::Liveness,
             elapsed_us: u64::try_from(liveness_started.elapsed().as_micros()).unwrap_or(u64::MAX),
