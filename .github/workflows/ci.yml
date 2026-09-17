@@ -41,7 +41,7 @@ concurrency:
 # required gate.
 #
 # The hardware lanes live elsewhere and are push-triggered on purpose:
-#   hardware-checks.yml   real TPM + the pinned TFLite runtime, either machine
+#   hardware-checks.yml   real TPM, either machine
 #   hardware-suite.yml    real IR camera + TPM, either capable machine
 #
 # Self-hosted runners are NOT an outage hedge: they still need the Actions

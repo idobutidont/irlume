@@ -1,7 +1,6 @@
-# The checks that need REAL hardware: a physical TPM and the pinned TFLite
-# runtime installed on the machine. Everything a hosted runner can do lives
-# in ci.yml, which is pull_request-triggered so fork PRs get the full
-# required gate.
+# The checks that need REAL hardware: a physical TPM. Everything a hosted
+# runner can do lives in ci.yml, which is pull_request-triggered so fork PRs get
+# the full required gate.
 #
 # SECURITY: push-trigger only. A pull_request run executes the workflow file
 # from the PR head, so a fork PR could edit its way onto a personal machine.
@@ -24,9 +23,9 @@ concurrency:
 
 jobs:
   hardware:
-    name: hardware checks (real TPM, pinned TFLite runtime)
-    # Both machines carry a real TPM and the pinned runtime, so the shared
-    # label lets whichever is free take it.
+    name: hardware checks (real TPM)
+    # Both machines carry a real TPM, so the shared label lets whichever is
+    # free take it.
     runs-on: [self-hosted, ci]
     timeout-minutes: 30
     steps:
@@ -37,34 +36,8 @@ jobs:
       - name: Fetch model weights (models-v1 release, sha256-verified)
         run: bash scripts/fetch-models.sh
 
-      - name: Fetch pinned full-range TFLite test model
-        run: |
-          curl --fail --location --retry 3 \
-            https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite \
-            --output "$RUNNER_TEMP/blaze_face_full_range.tflite"
-          printf '%s  %s\n' \
-            3698b18f063835bc609069ef052228fbe86d9c9a6dc8dcb7c7c2d69aed2b181b \
-            "$RUNNER_TEMP/blaze_face_full_range.tflite" | sha256sum --check --strict
-
       - name: build (release)
         run: cargo build --release --locked
-
-      # The production TFLite mesh and actual C-API buffer lifetime, ENFORCED. These are
-      # #[ignore]d because they need the packaged runtime, so a rename or a
-      # silent skip fails the --require guard instead of reading as green.
-      # Both runners carry the pinned libtensorflowlite_c.so at the
-      # resolver's first probe path.
-      - name: test (production TFLite FaceMesh, end to end)
-        env:
-          IRLUME_TFLITE_LIB: /usr/share/irlume/tflite/libtensorflowlite_c.so
-        run: |
-          IRLUME_TFLITE_MESH_TEST_MODEL="$GITHUB_WORKSPACE/models/face_landmarks_detector.tflite" \
-          IRLUME_TFLITE_TEST_MODEL="$RUNNER_TEMP/blaze_face_full_range.tflite" \
-            ./scripts/run-tests-guarded.sh --require pinned_landmarker_mesh_serves_landmarks_via_facemesh \
-            --require pinned_mesh_session_retains_the_owned_allocation \
-            --require pinned_mesh_reaches_c_api_without_rewriting \
-            --require pinned_full_range_reaches_c_api_without_rewriting \
-            -- cargo test -p irlume-vision --locked -- --ignored pinned_ --test-threads=1
 
       - name: test (TPM-gated, against the REAL TPM)
         run: |

@@ -394,7 +394,6 @@ APPARMOR_PROFILES=(
   packaging/apparmor/usr.local.bin.irlumed
 )
 APPARMOR_RUNTIME_RULES=(
-  "/usr/share/irlume/tflite/libtensorflowlite_c.so mr,"
   "/var/lib/systemd/pcrlock.json r,"
   "deny capability sys_ptrace,"
   "/dev/ r,"
