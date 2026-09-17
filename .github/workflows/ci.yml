@@ -14,23 +14,24 @@ name: CI
 # not the base branch either; that second one is `pull_request_target`.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   # No base-branch filter: stacked PRs (a branch targeting another feature
   # branch) previously ran ZERO checks.
   pull_request:
+  workflow_dispatch:
 
 # Least privilege for GITHUB_TOKEN: this workflow only reads the repo
 # (checkout + LFS); nothing here publishes or writes.
 permissions:
   contents: read
 
-# A newer push cancels the in-flight run on PRs only. On main every push
-# keeps its run: two pushes in quick succession otherwise leave the first
-# commit with cancelled (never-completed) checks, which once let a merge
+# A newer push cancels the in-flight run on non-main branches and PRs. On main
+# every push keeps its run: two pushes in quick succession otherwise leave the
+# first commit with cancelled (never-completed) checks, which once let a merge
 # commit land on main untested.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.ref != 'refs/heads/main' }}
 
 # Runner routing. irlume is a PUBLIC repo, so GitHub-hosted runners are free
 # and unmetered, and hosted jobs run in PARALLEL rather than queueing behind
