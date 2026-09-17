@@ -147,7 +147,9 @@ fn run(user: &str) -> Result<(), String> {
 fn connect_with_deadline(sock: &std::path::Path) -> Result<UnixStream, String> {
     use std::os::unix::io::{AsRawFd, FromRawFd};
 
-    #[expect(clippy::undocumented_unsafe_blocks, reason = "doc backlog")]
+    // SAFETY: sockaddr_un is a plain C struct with no invalid bit patterns;
+    // zeroed memory is a valid initial state (sun_family set below, sun_path
+    // filled before use).
     let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
     let bytes = sock.as_os_str().as_bytes();
     if bytes.len() >= std::mem::size_of_val(&addr.sun_path) {
@@ -172,7 +174,9 @@ fn connect_with_deadline(sock: &std::path::Path) -> Result<UnixStream, String> {
         if fd < 0 {
             return Err(format!("socket: {}", std::io::Error::last_os_error()));
         }
-        #[expect(clippy::undocumented_unsafe_blocks, reason = "doc backlog")]
+        // SAFETY: fd is a valid, freshly-created socket descriptor from the
+        // socket() call above; ownership transfers to UnixStream which will
+        // close it on drop.
         let stream = unsafe { UnixStream::from_raw_fd(fd) };
 
         // SAFETY: addr is fully initialised above; the length is its real size.
@@ -202,6 +206,8 @@ fn connect_with_deadline(sock: &std::path::Path) -> Result<UnixStream, String> {
                     revents: 0,
                 };
                 let poll_timeout = remain.as_millis().min(i32::MAX as u128) as libc::c_int;
+                // SAFETY: pfd is a valid, stack-allocated pollfd array of length 1;
+                // fd is a valid open socket descriptor.
                 let n = unsafe { libc::poll(&mut pfd, 1, poll_timeout) };
                 if n == 0 {
                     return Err(format!(
@@ -215,6 +221,8 @@ fn connect_with_deadline(sock: &std::path::Path) -> Result<UnixStream, String> {
                 }
                 let mut err: libc::c_int = 0;
                 let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+                // SAFETY: fd is a valid open socket; err and len are valid
+                // stack-allocated buffers of the correct type and size for SO_ERROR.
                 let opt_rc = unsafe {
                     libc::getsockopt(
                         fd,

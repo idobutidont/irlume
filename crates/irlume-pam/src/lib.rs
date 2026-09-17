@@ -514,9 +514,12 @@ fn stash_authtok(pamh: &Pam) {
 /// password and ask the daemon to re-seal it if the envelope is armed and stale.
 /// Best-effort and silent: a login session must never fail because of this.
 fn try_reseal_session(pamh: &Pam, user: &str) {
-    // SAFETY: the key was registered by `stash_authtok` in this same PAM
-    // transaction and is not replaced while the borrow is live; the borrow
-    // ends inside the first match arm, before `SecretBytes` copies it.
+    // SAFETY: get_secret returns a borrow into PAM module data. The invariant
+    // required is that the stash key is not replaced while the borrow is live.
+    // This holds because: (1) RESEAL_STASH_KEY is only written by stash_authtok
+    // in the auth phase, which completes before this session-phase function runs;
+    // (2) PAM module data is single-threaded per transaction; (3) the borrow
+    // ends at the match arm boundary before SecretBytes copies the data out.
     let pw = match unsafe { pamh.get_secret(RESEAL_STASH_KEY) } {
         Ok(stash) if !stash.is_empty() => SecretBytes::new(stash.expose().to_vec()),
         // No stash (e.g. a pure face login that submitted a blank field, or auth
@@ -548,9 +551,12 @@ fn try_reseal_session(pamh: &Pam, user: &str) {
 /// round trip costs only token users, only on their stash-less logins.
 /// Best-effort and silent like everything else in the session phase.
 fn deliver_gnome_token(pamh: &Pam, user: &str) {
-    // SAFETY: the key was registered by this module in the same PAM
-    // transaction and is not replaced while the borrow is live; the borrow
-    // ends inside the first match arm, before `SecretBytes` copies it.
+    // SAFETY: get_secret returns a borrow into PAM module data. The invariant
+    // required is that the stash key is not replaced while the borrow is live.
+    // This holds because: (1) GKR_TOKEN_STASH_KEY is only written during the
+    // auth phase, which completes before this session-phase function runs;
+    // (2) PAM module data is single-threaded per transaction; (3) the borrow
+    // ends at the match arm boundary before SecretBytes copies the data out.
     let token = match unsafe { pamh.get_secret(GKR_TOKEN_STASH_KEY) } {
         Ok(stash) if !stash.is_empty() => SecretBytes::new(stash.expose().to_vec()),
         _ => {

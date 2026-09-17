@@ -1480,7 +1480,22 @@ fn apparmor_confinement() -> Option<String> {
 // libxcrypt's one-way hash (glibc moved `crypt` out of libc into libcrypt).
 #[link(name = "crypt")]
 extern "C" {
-    fn crypt(key: *const libc::c_char, salt: *const libc::c_char) -> *mut libc::c_char;
+    fn crypt_r(
+        key: *const libc::c_char,
+        salt: *const libc::c_char,
+        data: *mut CryptData,
+    ) -> *mut libc::c_char;
+}
+
+const CRYPT_OUTPUT_SIZE: usize = 384;
+const CRYPT_MAX_PASSPHRASE_SIZE: usize = 512;
+
+#[repr(C)]
+struct CryptData {
+    output: [libc::c_char; CRYPT_OUTPUT_SIZE],
+    setting: [libc::c_char; CRYPT_OUTPUT_SIZE],
+    input: [libc::c_char; CRYPT_MAX_PASSPHRASE_SIZE],
+    initialized: libc::c_char,
 }
 
 /// Verify `password` against `user`'s `/etc/shadow` hash so `keyring arm` can
@@ -1510,19 +1525,21 @@ fn password_matches_login(user: &str, password: &[u8]) -> Option<bool> {
     key.extend_from_slice(password);
     key.push(0);
     let setting = std::ffi::CString::new(stored.as_str()).ok()?;
-    // SAFETY: `crypt` returns a pointer into a STATIC buffer, so concurrent calls
-    // would race. The daemon is NOT single-threaded, which an earlier version of
-    // this comment claimed: it runs up to 64 connection threads plus a watchdog
-    // and a penalty-box janitor. The invariant that actually holds is narrower
-    // and must be preserved: this is reached only from `dispatch`, and `dispatch`
-    // runs only on the one camera worker thread. Calling it from a connection
-    // thread would be a data race. The pointers are valid NUL-terminated C
-    // strings for the call's duration.
-    let out = unsafe { crypt(key.as_ptr() as *const libc::c_char, setting.as_ptr()) };
+    // SAFETY: crypt_r uses a caller-owned buffer (CryptData) instead of a static
+    // buffer, making it thread-safe. The struct is zero-initialized as required
+    // by libxcrypt before first use. Pointers are valid NUL-terminated C strings.
+    let mut data = zeroize::Zeroizing::new(CryptData {
+        output: [0; CRYPT_OUTPUT_SIZE],
+        setting: [0; CRYPT_OUTPUT_SIZE],
+        input: [0; CRYPT_MAX_PASSPHRASE_SIZE],
+        initialized: 0,
+    });
+    let out = unsafe { crypt_r(key.as_ptr() as *const libc::c_char, setting.as_ptr(), &mut *data) };
     if out.is_null() {
-        return None; // unsupported hash format on this libcrypt
+        return None;
     }
-    #[expect(clippy::undocumented_unsafe_blocks, reason = "doc backlog")]
+    // SAFETY: crypt_r returned a non-null pointer into data.output, which is
+    // valid and contains a NUL-terminated string on success.
     let computed = unsafe { std::ffi::CStr::from_ptr(out) };
     Some(computed.to_bytes() == stored.as_bytes())
 }

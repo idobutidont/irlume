@@ -3844,6 +3844,7 @@ impl Engine {
     /// statistic that held genuine at 0/531 presentations on LFW. The ring
     /// keeps the last [`VIT_PAD_VOTE_N`] scores of THIS authentication only
     /// (`authenticate_for` clears it).
+    #[cfg(test)]
     fn vit_pad_votes_deny(&mut self, score: f32) -> bool {
         if !score.is_finite() {
             return false; // inference garbage abstains, deny-only cannot fire on it
