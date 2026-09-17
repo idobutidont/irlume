@@ -1139,8 +1139,7 @@ mod onnx {
 
 #[cfg(feature = "onnx")]
 pub use onnx::{
-    runtime_resolution, selftest_alignment_identity,
-    Adapter, Detector, Embedder, PadIr,
+    runtime_resolution, selftest_alignment_identity, Adapter, Detector, Embedder, PadIr,
 };
 
 /// Model-backed pipeline tests: run the REAL shipped ONNX models (fetched to

@@ -295,14 +295,11 @@ fn idle_unload_duration() -> Option<std::time::Duration> {
         Ok(0) => None,
         Ok(secs) => Some(std::time::Duration::from_secs(secs)),
         Err(_) => {
-            jout_warn!(
-                "irlumed: invalid idle_unload_secs {raw:?}; using default of 300s"
-            );
+            jout_warn!("irlumed: invalid idle_unload_secs {raw:?}; using default of 300s");
             Some(std::time::Duration::from_secs(300))
         }
     }
 }
-
 
 fn pad_model_status(
     enabled: bool,
@@ -511,10 +508,7 @@ fn rebuild_engine_from_config(
     // Re-establish the same manifest policy as startup before rebuilding ONNX
     // sessions. Carry the recognizer bytes we actually hashed into its loader.
     let recognizer = verify_models(
-        &models_to_verify(
-            &[&config.det, &config.model],
-            &config.adapter,
-        ),
+        &models_to_verify(&[&config.det, &config.model], &config.adapter),
         Some(&config.model),
     );
     build_engine_from_config(config, recognizer)
@@ -7300,10 +7294,7 @@ mod tests {
     // from verification; a present one is still verified.
     #[test]
     fn missing_optional_adapter_is_not_verified() {
-        let shipped = [
-            "/etc/irlume/det.onnx",
-            "/etc/irlume/face.onnx",
-        ];
+        let shipped = ["/etc/irlume/det.onnx", "/etc/irlume/face.onnx"];
         assert_eq!(
             models_to_verify(&shipped, "/nonexistent/irlume-test/ir_adapter.onnx"),
             shipped.to_vec(),
@@ -7328,10 +7319,7 @@ mod tests {
     // unavailable (ADR-0019).
     #[test]
     fn pad_cues_stay_out_of_the_fatal_model_verification_path() {
-        let shipped = [
-            "/etc/irlume/det.onnx",
-            "/etc/irlume/face.onnx",
-        ];
+        let shipped = ["/etc/irlume/det.onnx", "/etc/irlume/face.onnx"];
         // PAD paths are not accepted by the fatal core verifier's interface.
         let _g = env_lock();
         std::env::remove_var("IRLUME_PAD_IR");
@@ -7592,10 +7580,8 @@ mod tests {
     #[test]
     fn ir_only_policy_skips_rgb_models() {
         let _guard = env_lock();
-        let dir = std::env::temp_dir().join(format!(
-            "irlume-ir-only-skip-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("irlume-ir-only-skip-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let settings = dir.join("settings.conf");
@@ -11339,8 +11325,8 @@ mod tests {
 
         // Shipped: a model whose digest IS in the manifest must start under
         // strict. We check flir.onnx or YuNet if present in the tree.
-        let candidate = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../models/flir.onnx");
+        let candidate =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../models/flir.onnx");
         let yunet = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../models/face_detection_yunet_2023mar.onnx");
         let test_model = if candidate.exists() {
@@ -11351,7 +11337,10 @@ mod tests {
             None
         };
         if let Some(model_path) = test_model {
-            let out = run("IRLUME_TEST_VERIFY_KNOWN_CHILD", model_path.to_str().unwrap());
+            let out = run(
+                "IRLUME_TEST_VERIFY_KNOWN_CHILD",
+                model_path.to_str().unwrap(),
+            );
             assert!(
                 out.status.success(),
                 "strict mode must accept a manifest-matching model; stderr: {}",

@@ -11941,9 +11941,7 @@ mod engine_tests {
             let e = e.with_ir_adapter(&adapter_model).unwrap();
             assert!(e.has_ir_adapter());
             let adapter_space = e.ir_space().to_string();
-            let mut e = e
-                .with_pad_ir(&adapter_model)
-                .unwrap();
+            let mut e = e.with_pad_ir(&adapter_model).unwrap();
             // Shared baseline is the raw (no-adapter) space; tests needing an
             // adapter set one temporarily and restore.
             e.ir_adapter = None;

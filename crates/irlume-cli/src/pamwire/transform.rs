@@ -141,7 +141,9 @@ pub(super) fn wire_greeter_impl(
         let sess_insert_at = lines
             .iter()
             .enumerate()
-            .rposition(|(i, l)| is_session_keyring_consumer(l) && sess_inc_at.map_or(true, |s| i >= s))
+            .rposition(|(i, l)| {
+                is_session_keyring_consumer(l) && sess_inc_at.map_or(true, |s| i >= s)
+            })
             .or(sess_inc_at);
         for (i, l) in lines.iter().enumerate() {
             if i == inc_at {

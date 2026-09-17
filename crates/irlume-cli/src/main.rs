@@ -115,9 +115,7 @@ fn main() -> std::process::ExitCode {
     // where it cannot disturb a consumer parsing stdout.
     if let Some(named) = flag(&args, "--user").filter(|s| !s.is_empty()) {
         if !irlume_common::platform::user_exists(named) {
-            eprintln!(
-                "irlume: note: user '{named}' not found on system"
-            );
+            eprintln!("irlume: note: user '{named}' not found on system");
         }
     }
     // Gate the developer tools unless IRLUME_DEV is set. Exception:
@@ -4091,10 +4089,7 @@ fn doctor_run(
             }
             Err(why) => {
                 report.check_detail("onnxruntime", State::Fail, format!("{source}: {why}"));
-                dout!(
-                    report,
-                    "[doctor] ONNX Runtime: {source} unusable ✗ ({why})"
-                );
+                dout!(report, "[doctor] ONNX Runtime: {source} unusable ✗ ({why})");
             }
         }
     }

@@ -40,9 +40,7 @@ pub fn update(args: &[String]) -> ExitCode {
     // silently disagree (doctor's install-hygiene check has the detail).
     let bin = env!("CARGO_PKG_VERSION");
     if version_base(&current) != bin {
-        println!(
-            "[update] note: running binary is {bin}, packaged version is {current}"
-        );
+        println!("[update] note: running binary is {bin}, packaged version is {current}");
     }
 
     let release = latest_release();
@@ -58,7 +56,9 @@ pub fn update(args: &[String]) -> ExitCode {
             }
         }
         None => {
-            println!("[update] unable to reach release feed. Update channel for this installation:");
+            println!(
+                "[update] unable to reach release feed. Update channel for this installation:"
+            );
             false
         }
     };
@@ -265,7 +265,9 @@ fn recommend_channel(origin: &InstallOrigin) {
                     println!("  The PPA carries only the current Ubuntu LTS; for `{codename}` update via release .deb.");
                 }
                 None => {
-                    println!("  If the PPA serves this Ubuntu series, enable it for automatic updates:");
+                    println!(
+                        "  If the PPA serves this Ubuntu series, enable it for automatic updates:"
+                    );
                     println!("    sudo add-apt-repository ppa:archledger/irlume && sudo apt install irlume");
                 }
             }

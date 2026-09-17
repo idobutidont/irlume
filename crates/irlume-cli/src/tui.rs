@@ -9209,8 +9209,6 @@ fn ort_fallback_check(found: bool) -> Check {
     }
 }
 
-
-
 // ---- async response mappers (Response -> (ok, message)) -------------------
 
 /// Describe the requested effect without formatting request fields. Activity
@@ -15770,7 +15768,6 @@ mod tests {
 
     /// The four TFLite states, driven through the injected `exists` so no
     /// test depends on what this machine has installed. The one that differs
-
 
     #[test]
     fn repair_reports_the_daemons_seal_tier_not_the_weakest_rung() {

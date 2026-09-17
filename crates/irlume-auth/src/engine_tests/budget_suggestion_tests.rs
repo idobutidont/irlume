@@ -42,10 +42,7 @@ impl<'a> ReadyEngine<'a> {
     fn new(engine: &'a mut Engine) -> Self {
         let old_ir = std::mem::replace(&mut engine.ir_available, true);
         assert!(engine.has_pad_ir());
-        Self {
-            engine,
-            old_ir,
-        }
+        Self { engine, old_ir }
     }
 }
 impl Drop for ReadyEngine<'_> {
