@@ -1495,13 +1495,17 @@ const CRYPT_OUTPUT_SIZE: usize = 384;
 const CRYPT_MAX_PASSPHRASE_SIZE: usize = 512;
 
 #[repr(C)]
-#[derive(zeroize::DefaultIsZeroes)]
 struct CryptData {
     output: [libc::c_char; CRYPT_OUTPUT_SIZE],
     setting: [libc::c_char; CRYPT_OUTPUT_SIZE],
     input: [libc::c_char; CRYPT_MAX_PASSPHRASE_SIZE],
     initialized: libc::c_char,
 }
+
+// SAFETY: CryptData is a plain C struct of primitive integer types and fixed-size
+// arrays thereof. All-zeros is a valid bit pattern for every field (c_char = i8/u8),
+// so zeroing the memory is equivalent to a valid default value.
+impl zeroize::DefaultIsZeroes for CryptData {}
 
 /// Verify `password` against `user`'s `/etc/shadow` hash so `keyring arm` can
 /// reject a password that is not the current LOGIN password (the cause of the
