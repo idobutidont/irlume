@@ -2687,18 +2687,18 @@ mod tests {
 
     #[test]
     fn models_list_reports_the_shipped_stages() {
-        // Contract 1 keeps its shape after the BYOM removal (ADR-0015): the
-        // four stages remain, `open` is present and false everywhere (no
-        // stage accepts third-party models anymore), and no stage carries a
-        // third_party object — exactly what the schema requires of closed
-        // stages.
+        // Contract 1 keeps its shape after the BYOM removal (ADR-0015) and
+        // the landmarks stage removal (IR-only pipeline): the three remaining
+        // stages are present, `open` is false everywhere (no stage accepts
+        // third-party models), and no stage carries a third_party object —
+        // exactly what the schema requires of closed stages.
         let data = models_list_data();
         let stages = data["stages"].as_array().expect("stages array");
         let names: Vec<&str> = stages
             .iter()
             .map(|s| s["stage"].as_str().expect("stage name"))
             .collect();
-        assert_eq!(names, ["detection", "landmarks", "recognition", "pad"]);
+        assert_eq!(names, ["detection", "recognition", "pad"]);
         for s in stages {
             assert_eq!(s["open"], false, "stage {}: no stage is open", s["stage"]);
             assert!(
@@ -2709,7 +2709,7 @@ mod tests {
             assert!(s["candidate"].get("file").is_some() || s["candidate"]["origin"] == "built-in");
         }
         assert_eq!(stages[0]["required"], true);
-        assert_eq!(stages[3]["candidate"]["origin"], "built-in");
+        assert_eq!(stages[2]["candidate"]["origin"], "built-in");
     }
     fn event_value(
         stream: &EventStream,

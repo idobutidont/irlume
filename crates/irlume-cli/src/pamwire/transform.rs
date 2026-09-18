@@ -142,7 +142,7 @@ pub(super) fn wire_greeter_impl(
             .iter()
             .enumerate()
             .rposition(|(i, l)| {
-                is_session_keyring_consumer(l) && sess_inc_at.map_or(true, |s| i >= s)
+                is_session_keyring_consumer(l) && sess_inc_at.is_none_or(|s| i >= s)
             })
             .or(sess_inc_at);
         for (i, l) in lines.iter().enumerate() {
@@ -181,7 +181,7 @@ pub(super) fn wire_greeter_impl(
     let sess_insert_at = lines
         .iter()
         .enumerate()
-        .rposition(|(i, l)| is_session_keyring_consumer(l) && sess_at.map_or(true, |s| i >= s))
+        .rposition(|(i, l)| is_session_keyring_consumer(l) && sess_at.is_none_or(|s| i >= s))
         .or(sess_at);
     let mut out = Vec::with_capacity(lines.len() + 5);
     for (i, l) in lines.iter().enumerate() {
