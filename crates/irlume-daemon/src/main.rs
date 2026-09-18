@@ -1495,6 +1495,7 @@ const CRYPT_OUTPUT_SIZE: usize = 384;
 const CRYPT_MAX_PASSPHRASE_SIZE: usize = 512;
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
 struct CryptData {
     output: [libc::c_char; CRYPT_OUTPUT_SIZE],
     setting: [libc::c_char; CRYPT_OUTPUT_SIZE],
