@@ -4107,7 +4107,6 @@ fn doctor_run(
         let Some(file) = s.file else { continue };
         let id = match s.stage {
             "detection" => "stage-detection-model",
-            "landmarks" => "stage-landmarks-model",
             "recognition" => "stage-recognition-model",
             other => unreachable!("file-backed stage without a check id: {other}"),
         };

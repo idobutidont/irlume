@@ -239,11 +239,9 @@ reused for a different meaning. The registry as of this contract:
 | `rgb-stream-hello-minimum` | the negotiated RGB stream compared with the published Windows Hello RGB minimum (480x480@7.5fps). Same states as the IR check |
 | `models` | the ONNX weights irlume needs, present and checksummed |
 | `stage-detection-model` | the face-detection stage's model: the resolved file and whether it is shipped or an env override. `fail` when missing, because the daemon cannot start |
-| `stage-landmarks-model` | the landmarks (mesh) stage's model. `warn` when missing: BlazeFace detection-rescue alignment is unavailable. Head consent uses the primary detector's five landmarks and is unaffected |
 | `stage-recognition-model` | the recognizer stage's model. `fail` when missing, because the daemon cannot start |
 | `ort-dylib-path` | the `ORT_DYLIB_PATH` override, when one is set |
 | `onnxruntime` | the ONNX Runtime the resolver would load in this shell: the resolved path (or the system library) and its version. `fail` when that library is unloadable or below the API level irlume needs, because model loading cannot succeed against it (#187) |
-| `tflite-runtime` | the TFLite C runtime the mesh runs on, loaded in this shell. `fail` when an explicit `IRLUME_TFLITE_LIB` is set but invalid or unloadable (an operator mistake this shell can see); `warn` when nothing resolved, because the daemon's unit may set its own path this shell cannot observe |
 | `fingerprint-reader` | whether a fingerprint reader was found |
 | `templates` | face templates encrypted at rest for the account asked about |
 | `recovery-passphrase` | whether a recovery passphrase is set |
