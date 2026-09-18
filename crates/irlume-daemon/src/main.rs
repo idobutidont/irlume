@@ -250,14 +250,6 @@ fn pad_ir_enabled() -> bool {
     )
 }
 
-/// Whether the machine-wide sensor policy is set to IR-only mode.
-fn is_ir_only_policy() -> bool {
-    matches!(
-        irlume_common::config::observe_face_sensor_policy().resolve(),
-        Ok(irlume_common::config::FaceSensorPolicy::IrOnlyExperimental)
-    )
-}
-
 /// Idle duration before unloading models from memory.
 /// Configured via `IRLUME_IDLE_UNLOAD_SECS` or `idle_unload_secs` in settings.conf.
 /// Defaults to 300 seconds (5 minutes). Set to 0, "off", or "none" to disable idle unloading.
@@ -793,6 +785,10 @@ fn main() {
             };
             let (engine, rgb_pad_status, ir_pad_status) = engine;
             publish_engine_bits(&engine, rgb_pad_status, ir_pad_status);
+            // SAFETY: malloc_trim is a POSIX extension that releases free heap
+            // memory back to the OS. It takes no user-supplied pointers and has
+            // no preconditions beyond being called from a single-threaded context
+            // or after all allocations are complete (we just finished loading).
             #[cfg(target_os = "linux")]
             unsafe {
                 libc::malloc_trim(0);
@@ -929,6 +925,8 @@ fn main() {
                                                 "irlumed: idle timeout reached; releasing model sessions to reclaim memory"
                                             );
                                             engine = None;
+                                            // SAFETY: malloc_trim releases free heap memory to the OS.
+                                            // Called after dropping the engine (all model memory freed).
                                             #[cfg(target_os = "linux")]
                                             unsafe {
                                                 libc::malloc_trim(0);
@@ -986,6 +984,8 @@ fn main() {
                                             rgb_pad_status,
                                             ir_pad_status,
                                         );
+                                        // SAFETY: malloc_trim releases free heap memory to the OS.
+                                        // Called after reloading models to reclaim transient allocations.
                                         #[cfg(target_os = "linux")]
                                         unsafe {
                                             libc::malloc_trim(0);
@@ -1077,6 +1077,9 @@ fn main() {
                                                 rgb_pad_status,
                                                 ir_pad_status,
                                             );
+                                            // SAFETY: malloc_trim releases free heap memory to the OS.
+                                            // Called after rebuilding the engine post-panic to reclaim
+                                            // transient allocations from the failed load attempt.
                                             #[cfg(target_os = "linux")]
                                             unsafe {
                                                 libc::malloc_trim(0);
@@ -1542,15 +1545,15 @@ fn password_matches_login(user: &str, password: &[u8]) -> Option<bool> {
     key.extend_from_slice(password);
     key.push(0);
     let setting = std::ffi::CString::new(stored.as_str()).ok()?;
-    // SAFETY: crypt_r uses a caller-owned buffer (CryptData) instead of a static
-    // buffer, making it thread-safe. The struct is zero-initialized as required
-    // by libxcrypt before first use. Pointers are valid NUL-terminated C strings.
     let mut data = zeroize::Zeroizing::new(CryptData {
         output: [0; CRYPT_OUTPUT_SIZE],
         setting: [0; CRYPT_OUTPUT_SIZE],
         input: [0; CRYPT_MAX_PASSPHRASE_SIZE],
         initialized: 0,
     });
+    // SAFETY: crypt_r uses a caller-owned buffer (CryptData) instead of a static
+    // buffer, making it thread-safe. The struct is zero-initialized as required
+    // by libxcrypt before first use. Pointers are valid NUL-terminated C strings.
     let out = unsafe {
         crypt_r(
             key.as_ptr() as *const libc::c_char,
@@ -7571,7 +7574,10 @@ mod tests {
         std::fs::write(&settings, "face_sensor_policy = ir-only-experimental\n").unwrap();
         std::env::set_var("IRLUME_CONFIG_DIR", &dir);
 
-        assert!(is_ir_only_policy());
+        assert!(matches!(
+            irlume_common::config::observe_face_sensor_policy().resolve(),
+            Ok(irlume_common::config::FaceSensorPolicy::IrOnlyExperimental)
+        ));
 
         let base = irlume_auth::Engine::load(
             &model_path("face_detection_yunet_2023mar.onnx"),

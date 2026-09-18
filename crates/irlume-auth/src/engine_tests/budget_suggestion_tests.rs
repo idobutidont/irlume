@@ -146,26 +146,31 @@ fn budget_hint_reserves_time_once_and_never_resets_request_origin() {
     let mut s = shared();
     let ready = ReadyEngine::new(&mut s.engine);
     std::env::set_var("IRLUME_PRIVILEGED_GROUPED_PAD", "1");
+    // ViT RGB PAD was removed (IR-only pipeline); has_vit_pad() is always false,
+    // so the privileged grouped candidate condition is never met and the hint
+    // callback is never evaluated. The window stays at the default grace period.
     for service in ["sudo", "polkit-1"] {
-        for hint in [false, true] {
-            let started = Instant::now() - Duration::from_secs(2);
-            let calls = Cell::new(0);
-            let window = ready.engine.authentication_window_from_with_hint(
-                started,
-                Some(service),
-                AuthenticationPurpose::for_service(Some(service)),
-                Dual,
-                || {
-                    calls.set(calls.get() + 1);
-                    hint
-                },
-            );
-            let expected = if hint { 15_000 } else { 5_000 };
-            assert_eq!(calls.get(), 1);
-            assert_eq!(window.milliseconds, expected);
-            assert_eq!(window.deadline, started + Duration::from_millis(expected));
-        }
+        let started = Instant::now() - Duration::from_secs(2);
+        let calls = Cell::new(0);
+        let window = ready.engine.authentication_window_from_with_hint(
+            started,
+            Some(service),
+            AuthenticationPurpose::for_service(Some(service)),
+            Dual,
+            || {
+                calls.set(calls.get() + 1);
+                true
+            },
+        );
+        assert_eq!(calls.get(), 0, "hint must not be called without ViT PAD");
+        assert_eq!(window.milliseconds, SUDO_GRACE_WINDOW_MS);
+        assert_eq!(
+            window.deadline,
+            started + Duration::from_millis(SUDO_GRACE_WINDOW_MS)
+        );
     }
+    // Even when the hint would set an override mid-call, it is never reached,
+    // so the snapshot remains the default.
     let window = ready.engine.authentication_window_from_with_hint(
         Instant::now(),
         Some("sudo"),
@@ -177,8 +182,8 @@ fn budget_hint_reserves_time_once_and_never_resets_request_origin() {
         },
     );
     assert_eq!(
-        window.milliseconds, 15_000,
-        "the entry override snapshot must not be reread after the hint"
+        window.milliseconds, SUDO_GRACE_WINDOW_MS,
+        "without ViT PAD the hint is never evaluated; default window applies"
     );
 }
 
