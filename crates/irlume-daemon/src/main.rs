@@ -1495,12 +1495,19 @@ const CRYPT_OUTPUT_SIZE: usize = 384;
 const CRYPT_MAX_PASSPHRASE_SIZE: usize = 512;
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 struct CryptData {
     output: [libc::c_char; CRYPT_OUTPUT_SIZE],
     setting: [libc::c_char; CRYPT_OUTPUT_SIZE],
     input: [libc::c_char; CRYPT_MAX_PASSPHRASE_SIZE],
     initialized: libc::c_char,
+}
+
+impl Default for CryptData {
+    fn default() -> Self {
+        // SAFETY: all-zeros is a valid bit pattern for every field (c_char arrays + c_char).
+        unsafe { std::mem::zeroed() }
+    }
 }
 
 // SAFETY: CryptData is a plain C struct of primitive integer types and fixed-size
