@@ -1010,7 +1010,10 @@ fn uninstall_requires_root() {
     let sb = Sandbox::new("uninstall");
     let (code, _, err) = run(&mut sb.cmd(&["uninstall"]));
     assert_eq!(code, 1);
-    assert!(err.contains("needs root: sudo irlume uninstall"), "{err}");
+    assert!(
+        err.contains("root privileges required (sudo irlume uninstall)"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -1127,10 +1130,7 @@ fn update_uses_fake_probes_and_reports_per_scenario() {
     sb.fake_tool("curl", r#"printf '%s' '{"tag_name": "v0.0.1"}'"#);
     let (code, out, _) = run(&mut sb.cmd_with_fakes(&["update", "--check"]));
     assert_eq!(code, 0);
-    assert!(
-        out.contains("up to date (latest release is v0.0.1)"),
-        "{out}"
-    );
+    assert!(out.contains("up to date (version v0.0.1)"), "{out}");
 
     // Scenario 3: offline; degrade without updating anything.
     sb.fake_tool("curl", "exit 7");
