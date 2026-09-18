@@ -1136,7 +1136,7 @@ fn update_uses_fake_probes_and_reports_per_scenario() {
     sb.fake_tool("curl", "exit 7");
     let (code, out, _) = run(&mut sb.cmd_with_fakes(&["update", "--check"]));
     assert_eq!(code, 0);
-    assert!(out.contains("couldn't reach the release feed"), "{out}");
+    assert!(out.contains("unable to reach release feed"), "{out}");
 }
 
 // ------------------------------------------------------------------- padreport
