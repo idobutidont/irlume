@@ -1538,7 +1538,13 @@ fn password_matches_login(user: &str, password: &[u8]) -> Option<bool> {
         input: [0; CRYPT_MAX_PASSPHRASE_SIZE],
         initialized: 0,
     });
-    let out = unsafe { crypt_r(key.as_ptr() as *const libc::c_char, setting.as_ptr(), &mut *data) };
+    let out = unsafe {
+        crypt_r(
+            key.as_ptr() as *const libc::c_char,
+            setting.as_ptr(),
+            &mut *data,
+        )
+    };
     if out.is_null() {
         return None;
     }
