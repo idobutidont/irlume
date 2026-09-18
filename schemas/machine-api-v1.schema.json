@@ -882,9 +882,9 @@
       ],
       "properties": {
         "stages": {
-          "description": "The pipeline stages in order. The list may grow within the contract; a consumer must key on `stage`, not on position or count, and must ignore stage names it does not know.",
+            "description": "The pipeline stages in order. The list may grow within the contract; a consumer must key on `stage`, not on position or count, and must ignore stage names it does not know. The landmarks stage was removed with the IR-only pipeline.",
           "type": "array",
-          "minItems": 4,
+            "minItems": 3,
           "items": {
             "$ref": "#/$defs/modelStage"
           },
@@ -895,19 +895,6 @@
                 "properties": {
                   "stage": {
                     "const": "detection"
-                  }
-                },
-                "required": [
-                  "stage"
-                ]
-              }
-            },
-            {
-              "contains": {
-                "type": "object",
-                "properties": {
-                  "stage": {
-                    "const": "landmarks"
                   }
                 },
                 "required": [
@@ -955,11 +942,10 @@
       ],
       "properties": {
         "stage": {
-          "description": "Stage name. Stable public API; the set may grow within the contract, so it is deliberately not a closed enum \u2014 unknown names must be ignored, and the four current stages are guaranteed present by `modelsListData`.",
+          "description": "Stage name. Stable public API; the set may grow within the contract, so it is deliberately not a closed enum \u2014 unknown names must be ignored, and the three current stages are guaranteed present by `modelsListData`.",
           "type": "string",
           "examples": [
             "detection",
-            "landmarks",
             "recognition",
             "pad"
           ]
